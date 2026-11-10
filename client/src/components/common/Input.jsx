@@ -1,43 +1,46 @@
-import React, { useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import React, { useState, useId } from 'react';
+import { Eye, EyeOff, AlertCircle } from 'lucide-react';
 
 export default function Input({
   label,
-  id,
-  name,
   type = 'text',
   value,
   onChange,
-  onBlur,
+  name,
   placeholder,
   error,
   helperText,
-  icon: Icon,
-  required = false,
+  icon: Icon = null,
   disabled = false,
-  className = '',
+  required = false,
   autoComplete,
+  id,
+  className = '',
   ...props
 }) {
   const [showPassword, setShowPassword] = useState(false);
-  const isPassword = type === 'password';
-  const effectiveType = isPassword ? (showPassword ? 'text' : 'password') : type;
-  const inputId = id || name;
+  const reactGeneratedId = useId();
+  const inputId = id || name || reactGeneratedId;
+
+  const isPasswordType = type === 'password';
+  const effectiveType = isPasswordType ? (showPassword ? 'text' : 'password') : type;
 
   return (
-    <div className={`w-full text-left ${className}`}>
+    <div className={`w-full text-left space-y-1.5 ${className}`}>
       {label && (
-        <label
-          htmlFor={inputId}
-          className="block text-xs font-medium uppercase tracking-wider text-[#94A3B8] mb-1.5"
-        >
-          {label} {required && <span className="text-[#00E5D4]">*</span>}
-        </label>
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor={inputId}
+            className="block text-xs font-semibold tracking-wider text-[#94A3B8] uppercase"
+          >
+            {label} {required && <span className="text-[#00E5D4]">*</span>}
+          </label>
+        </div>
       )}
 
-      <div className="relative flex items-center">
+      <div className="relative group">
         {Icon && (
-          <div className="absolute left-3.5 flex items-center pointer-events-none text-[#64748B] group-focus-within:text-[#00E5D4]">
+          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B] group-focus-within:text-[#00E5D4] transition-colors">
             <Icon className="w-4 h-4" />
           </div>
         )}
@@ -48,31 +51,32 @@ export default function Input({
           type={effectiveType}
           value={value}
           onChange={onChange}
-          onBlur={onBlur}
           disabled={disabled}
+          required={required}
           placeholder={placeholder}
           autoComplete={autoComplete}
-          required={required}
-          className={`w-full rounded-xl bg-[#111719] text-[#F3F6F6] text-sm placeholder-[#4B5563] border transition-all duration-200 outline-none
-            ${Icon ? 'pl-10' : 'pl-4'}
-            ${isPassword ? 'pr-11' : 'pr-4'}
-            py-3
+          className={`
+            w-full bg-[#111719]/90 text-[#F3F6F6] text-sm rounded-xl px-3.5 py-3
+            border transition-all duration-200 outline-none
+            placeholder:text-[#64748B]
+            ${Icon ? 'pl-10' : 'pl-3.5'}
+            ${isPasswordType ? 'pr-11' : 'pr-3.5'}
             ${
               error
-                ? 'border-rose-500/70 focus:border-rose-400 focus:ring-2 focus:ring-rose-500/20'
-                : 'border-white/10 hover:border-white/20 focus:border-[#00E5D4] focus:ring-2 focus:ring-[#00E5D4]/20'
+                ? 'border-rose-500/60 focus:border-rose-500 focus:ring-1 focus:ring-rose-500/30'
+                : 'border-white/10 hover:border-white/20 focus:border-[#00E5D4] focus:ring-2 focus:ring-[#00E5D4]/20 focus:shadow-[0_0_20px_rgba(0,229,212,0.15)]'
             }
-            ${disabled ? 'opacity-50 cursor-not-allowed bg-black/40' : ''}
+            disabled:opacity-50 disabled:cursor-not-allowed
           `}
           {...props}
         />
 
-        {isPassword && (
+        {isPasswordType && (
           <button
             type="button"
-            onClick={() => setShowPassword(!showPassword)}
             tabIndex={-1}
-            className="absolute right-3.5 p-1 text-[#64748B] hover:text-[#00E5D4] transition-colors focus:outline-none"
+            onClick={() => setShowPassword((prev) => !prev)}
+            className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-[#64748B] hover:text-[#00E5D4] transition-colors cursor-pointer"
             aria-label={showPassword ? 'Hide password' : 'Show password'}
           >
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -81,14 +85,13 @@ export default function Input({
       </div>
 
       {error ? (
-        <p className="mt-1.5 text-xs text-rose-400 flex items-center gap-1 animate-fadeIn">
-          <span className="w-1 h-1 rounded-full bg-rose-400 inline-block" />
-          {error}
-        </p>
+        <div className="flex items-center gap-1.5 text-xs text-rose-400 mt-1 animate-fadeIn">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>{error}</span>
+        </div>
       ) : helperText ? (
-        <p className="mt-1.5 text-xs text-[#64748B]">{helperText}</p>
+        <p className="text-xs text-[#64748B] mt-1">{helperText}</p>
       ) : null}
     </div>
   );
 }
-

@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, Mail, Lock, ArrowRight, AlertCircle, ChevronLeft, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Lock, ArrowLeft, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import useAuth from '../context/useAuth';
 import Logo from '../components/common/Logo';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
-import { useAuth } from '../context/useAuth';
+import Card from '../components/common/Card';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { register, authError, setAuthError } = useAuth();
 
   const [formData, setFormData] = useState({
     name: '',
@@ -18,13 +19,45 @@ export default function RegisterPage() {
   });
 
   const [fieldErrors, setFieldErrors] = useState({});
-  const [serverError, setServerError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const validateForm = () => {
+  const calculatePasswordStrength = (pwd) => {
+    if (!pwd) return { score: 0, label: '', color: 'bg-transparent' };
+    let score = 0;
+    if (pwd.length >= 6) score += 1;
+    if (pwd.length >= 8) score += 1;
+    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score += 1;
+    if (/[0-9]/.test(pwd) || /[^A-Za-z0-9]/.test(pwd)) score += 1;
+
+    switch (score) {
+      case 1:
+        return { score, label: 'Weak', color: 'bg-rose-500' };
+      case 2:
+        return { score, label: 'Fair', color: 'bg-amber-500' };
+      case 3:
+        return { score, label: 'Good', color: 'bg-cyan-400' };
+      case 4:
+      default:
+        return { score, label: 'Strong', color: 'bg-emerald-400' };
+    }
+  };
+
+  const strength = calculatePasswordStrength(formData.password);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => ({ ...prev, [name]: null }));
+    }
+    if (authError) {
+      setAuthError(null);
+    }
+  };
+
+  const validate = () => {
     const errors = {};
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
     if (!formData.name.trim()) {
       errors.name = 'Full name is required';
     } else if (formData.name.trim().length < 2) {
@@ -32,8 +65,8 @@ export default function RegisterPage() {
     }
 
     if (!formData.email.trim()) {
-      errors.email = 'Email address is required';
-    } else if (!emailRegex.test(formData.email.trim())) {
+      errors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
       errors.email = 'Please enter a valid email address';
     }
 
@@ -43,7 +76,7 @@ export default function RegisterPage() {
       errors.password = 'Password must be at least 6 characters';
     }
 
-    if (formData.confirmPassword !== formData.password) {
+    if (formData.password !== formData.confirmPassword) {
       errors.confirmPassword = 'Passwords do not match';
     }
 
@@ -51,153 +84,149 @@ export default function RegisterPage() {
     return Object.keys(errors).length === 0;
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (fieldErrors[name]) {
-      setFieldErrors((prev) => ({ ...prev, [name]: '' }));
-    }
-    if (serverError) {
-      setServerError('');
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!validateForm()) return;
+    if (!validate()) return;
 
-    setSubmitting(true);
-    setServerError('');
+    setIsSubmitting(true);
+    const result = await register(
+      formData.name.trim(),
+      formData.email.trim(),
+      formData.password
+    );
+    setIsSubmitting(false);
 
-    try {
-      await register(formData.name, formData.email, formData.password);
-      // Automatically redirect to dashboard on successful registration
+    if (result.success) {
       navigate('/dashboard', { replace: true });
-    } catch (err) {
-      setServerError(err.message || 'Registration failed. Please try again.');
-    } finally {
-      setSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#080B0D] flex flex-col justify-center items-center px-4 py-8 relative overflow-hidden select-none">
-      {/* Background Glow Accents */}
-      <div className="absolute top-1/4 -right-20 w-80 h-80 bg-[#00E5D4]/10 rounded-full blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-1/4 -left-20 w-80 h-80 bg-[#087E78]/15 rounded-full blur-[100px] pointer-events-none" />
+    <div className="min-h-screen w-full bg-[#080B0D] flex flex-col justify-center items-center px-4 py-8 relative overflow-hidden">
+      {/* Background ambient lighting */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] md:w-[500px] h-[350px] md:h-[500px] bg-[#00E5D4]/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-5 left-5 w-[200px] h-[200px] bg-[#087E78]/15 rounded-full blur-[90px] pointer-events-none" />
 
-      {/* Grid Pattern */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
-
-      {/* Navigation back to Welcome */}
-      <div className="w-full max-w-md mb-4 flex items-center justify-between z-10">
+      {/* Top back navigation */}
+      <div className="w-full max-w-md mb-4 flex items-center justify-between">
         <Link
           to="/welcome"
-          className="inline-flex items-center gap-1.5 text-xs text-[#8E9CA3] hover:text-[#00E5D4] transition-colors py-1 px-2.5 rounded-lg hover:bg-white/5"
+          className="inline-flex items-center gap-1.5 text-xs text-[#94A3B8] hover:text-[#00E5D4] transition-colors py-1 px-2 rounded-lg hover:bg-white/5"
         >
-          <ChevronLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           <span>Back</span>
         </Link>
-        <span className="text-xs text-[#64748B]">New Account</span>
+        <span className="text-xs text-[#64748B]">New Membership</span>
       </div>
 
-      {/* Register Card */}
-      <div className="w-full max-w-md bg-[#111719]/90 border border-white/10 rounded-3xl p-6 sm:p-8 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-10 relative">
-        {/* Subtle cyan glow line along top border */}
-        <div className="absolute -top-px left-1/4 right-1/4 h-px bg-gradient-to-r from-transparent via-[#00E5D4]/60 to-transparent" />
-
-        {/* Brand Header */}
+      {/* Main card */}
+      <Card className="w-full max-w-md p-6 sm:p-8 relative z-10 border-white/10 shadow-2xl">
+        {/* Header */}
         <div className="text-center mb-6">
           <div className="inline-block mb-3">
             <Logo size="md" />
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-[#F3F6F6]">
+          <h1 className="text-2xl font-bold tracking-tight text-[#F3F6F6]">
             Create Account
-          </h2>
-          <p className="text-sm text-[#8E9CA3] mt-1.5">
-            Join ALLIN to split expenses and settle balances seamlessly
+          </h1>
+          <p className="text-xs text-[#94A3B8] mt-1">
+            Join ALLIN to split expenses and settle balances together
           </p>
         </div>
 
-        {/* Server Error Alert */}
-        {serverError && (
-          <div className="mb-5 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3 text-rose-300 text-xs">
-            <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 font-medium">{serverError}</div>
+        {/* Global Error Banner */}
+        {authError && (
+          <div className="mb-5 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-2.5 text-xs text-rose-300">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+            <div className="flex-1">{authError}</div>
           </div>
         )}
 
-        {/* Register Form */}
+        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
           <Input
             label="Full Name"
-            id="register-name"
-            name="name"
             type="text"
-            placeholder="Alex Rivera"
+            name="name"
             value={formData.name}
             onChange={handleChange}
-            error={fieldErrors.name}
+            placeholder="Alex Morgan"
             icon={User}
-            required
+            error={fieldErrors.name}
             autoComplete="name"
-            disabled={submitting}
+            required
           />
 
           <Input
             label="Email Address"
-            id="register-email"
-            name="email"
             type="email"
-            placeholder="alex@example.com"
+            name="email"
             value={formData.email}
             onChange={handleChange}
-            error={fieldErrors.email}
+            placeholder="alex@example.com"
             icon={Mail}
-            required
+            error={fieldErrors.email}
             autoComplete="email"
-            disabled={submitting}
+            required
           />
 
-          <Input
-            label="Password"
-            id="register-password"
-            name="password"
-            type="password"
-            placeholder="Min. 6 characters"
-            value={formData.password}
-            onChange={handleChange}
-            error={fieldErrors.password}
-            icon={Lock}
-            required
-            autoComplete="new-password"
-            disabled={submitting}
-          />
+          <div>
+            <Input
+              label="Password"
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder="Minimum 6 characters"
+              icon={Lock}
+              error={fieldErrors.password}
+              autoComplete="new-password"
+              required
+            />
+
+            {/* Password strength visual meter */}
+            {formData.password && (
+              <div className="mt-2 space-y-1">
+                <div className="flex justify-between items-center text-[10px] text-[#94A3B8]">
+                  <span>Strength: {strength.label}</span>
+                  <span className="font-mono">{strength.score}/4</span>
+                </div>
+                <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex gap-1">
+                  {[1, 2, 3, 4].map((step) => (
+                    <div
+                      key={step}
+                      className={`h-full flex-1 rounded-full transition-all duration-300 ${
+                        step <= strength.score ? strength.color : 'bg-transparent'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           <Input
             label="Confirm Password"
-            id="register-confirm-password"
-            name="confirmPassword"
             type="password"
-            placeholder="Repeat password"
+            name="confirmPassword"
             value={formData.confirmPassword}
             onChange={handleChange}
-            error={fieldErrors.confirmPassword}
+            placeholder="Re-enter password"
             icon={Lock}
-            required
+            error={fieldErrors.confirmPassword}
             autoComplete="new-password"
-            disabled={submitting}
+            required
           />
 
-          {/* Perks list */}
-          <div className="py-2 space-y-1.5 text-xs text-[#8E9CA3]">
-            <div className="flex items-center gap-2">
+          {/* Fintech perks */}
+          <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1.5 text-[11px] text-[#94A3B8]">
+            <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-[#00E5D4]" />
-              <span>Create groups & invite friends via instant invite code</span>
+              <span>Instant invite code generation for your squads</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-[#00E5D4]" />
-              <span>Equal and custom bill splitting with PayPal settlement</span>
+              <span>Fair equal & custom expense splitting</span>
             </div>
           </div>
 
@@ -207,29 +236,35 @@ export default function RegisterPage() {
               variant="primary"
               size="lg"
               fullWidth
-              loading={submitting}
+              loading={isSubmitting}
               icon={ArrowRight}
               iconPosition="right"
-              className="shadow-[0_0_20px_rgba(0,229,212,0.3)] hover:shadow-[0_0_30px_rgba(0,229,212,0.5)]"
+              className="font-semibold shadow-[0_0_20px_rgba(0,229,212,0.3)]"
             >
-              Get Started Free
+              Create Account
             </Button>
           </div>
         </form>
 
         {/* Switch to Login */}
-        <div className="mt-6 pt-5 border-t border-white/5 text-center">
-          <p className="text-sm text-[#8E9CA3]">
-            Already have an account?{' '}
+        <div className="mt-5 pt-4 border-t border-white/5 text-center">
+          <p className="text-xs text-[#94A3B8]">
+            Already have an ALLIN account?{' '}
             <Link
               to="/login"
-              className="font-semibold text-[#00E5D4] hover:text-[#38BDF8] transition-colors ml-1"
+              className="text-[#00E5D4] font-medium hover:underline ml-1"
             >
               Sign In
             </Link>
           </p>
         </div>
-      </div>
+      </Card>
+
+      {/* Footer */}
+      <p className="mt-6 text-[11px] text-[#64748B] text-center max-w-xs">
+        By joining ALLIN, you agree to collaborative payment terms.
+      </p>
     </div>
   );
 }
+

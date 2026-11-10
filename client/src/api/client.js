@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// Create base Axios instance
+// Create centralized Axios instance
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   headers: {
@@ -26,7 +26,6 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // Don't auto-redirect if we're already on login/register/welcome
       const publicPaths = ['/login', '/register', '/welcome', '/'];
       const currentPath = window.location.pathname;
 

@@ -1,43 +1,73 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthContext } from './authContextInstance';
 import authService from '../services/authService';
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => authService.getCachedUser());
   const [token, setToken] = useState(() => authService.getToken());
-  const [loading, setLoading] = useState(() => Boolean(authService.getToken() && !authService.getCachedUser()));
-  const [error, setError] = useState(null);
+  const [user, setUser] = useState(() => authService.getCachedUser());
+  const [loading, setLoading] = useState(() => Boolean(authService.getToken()));
+  const [authError, setAuthError] = useState(null);
+
+  // Synchronize and verify session with backend
+  const verifySession = useCallback(async () => {
+    const existingToken = authService.getToken();
+    if (!existingToken) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const data = await authService.getMe();
+      if (data && data.user) {
+        setUser(data.user);
+        authService.saveSession(existingToken, data.user);
+      }
+    } catch (err) {
+      console.warn('Session verification error:', err?.response?.data?.message || err.message);
+      if (err?.response?.status === 401) {
+        authService.clearSession();
+        setUser(null);
+        setToken(null);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
-    const currentToken = authService.getToken();
+    const existingToken = authService.getToken();
 
-    if (currentToken && !authService.getCachedUser()) {
+    if (existingToken) {
       authService
         .getMe()
         .then((data) => {
           if (isMounted && data?.user) {
             setUser(data.user);
-            authService.saveSession(currentToken, data.user);
+            authService.saveSession(existingToken, data.user);
           }
         })
         .catch((err) => {
-          console.warn('Session verification error:', err.message);
           if (isMounted) {
-            authService.clearSession();
-            setUser(null);
-            setToken(null);
+            console.warn('Session verification error:', err?.response?.data?.message || err.message);
+            if (err?.response?.status === 401) {
+              authService.clearSession();
+              setUser(null);
+              setToken(null);
+            }
           }
         })
         .finally(() => {
-          if (isMounted) setLoading(false);
+          if (isMounted) {
+            setLoading(false);
+          }
         });
     }
 
     const handleExpired = () => {
-      authService.clearSession();
       setUser(null);
       setToken(null);
+      setAuthError('Your session has expired. Please log in again.');
     };
 
     window.addEventListener('allin_auth_expired', handleExpired);
@@ -47,57 +77,63 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // Login handler
   const login = async (email, password) => {
-    setError(null);
+    setAuthError(null);
     try {
       const data = await authService.login({ email, password });
-      authService.saveSession(data.token, data.user);
-      setToken(data.token);
-      setUser(data.user);
-      return data;
+      if (data && data.token) {
+        authService.saveSession(data.token, data.user);
+        setToken(data.token);
+        setUser(data.user);
+        return { success: true, data };
+      }
+      throw new Error(data?.message || 'Login failed');
     } catch (err) {
-      const msg =
-        err.response?.data?.message || err.message || 'Login failed. Please check your credentials.';
-      setError(msg);
-      throw new Error(msg);
+      const message = err.response?.data?.message || err.message || 'Login failed';
+      setAuthError(message);
+      return { success: false, error: message };
     }
   };
 
+  // Registration handler
   const register = async (name, email, password) => {
-    setError(null);
+    setAuthError(null);
     try {
       const data = await authService.register({ name, email, password });
-      authService.saveSession(data.token, data.user);
-      setToken(data.token);
-      setUser(data.user);
-      return data;
+      if (data && data.token) {
+        authService.saveSession(data.token, data.user);
+        setToken(data.token);
+        setUser(data.user);
+        return { success: true, data };
+      }
+      throw new Error(data?.message || 'Registration failed');
     } catch (err) {
-      const msg =
-        err.response?.data?.message || err.message || 'Registration failed. Please try again.';
-      setError(msg);
-      throw new Error(msg);
+      const message = err.response?.data?.message || err.message || 'Registration failed';
+      setAuthError(message);
+      return { success: false, error: message };
     }
   };
 
+  // Logout handler
   const logout = () => {
     authService.clearSession();
     setUser(null);
     setToken(null);
-    setError(null);
+    setAuthError(null);
   };
-
-  const clearError = () => setError(null);
 
   const value = {
     user,
     token,
     isAuthenticated: Boolean(token && user),
     loading,
-    error,
+    authError,
+    setAuthError,
     login,
     register,
     logout,
-    clearError,
+    refreshUser: verifySession,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
