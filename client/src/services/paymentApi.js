@@ -1,48 +1,44 @@
+import api from '../api/client';
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+export const createPaymentOrder = async (amount, currency = 'USD', groupId = null) => {
+  const response = await api.post('/payments/create-order', {
+    amount,
+    currency,
+    groupId,
+  });
 
-export const createPaymentOrder = async (amount, currency = "USD") => {
-  const response = await fetch(
-    `${API_BASE_URL}/api/payments/create-order`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ amount, currency }),
-    }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok || !data.success) {
-    throw new Error(data.message || "Unable to create payment order");
+  const data = response.data;
+  if (!data || !data.success) {
+    throw new Error(data?.message || 'Unable to create payment order');
   }
 
   if (!data.approvalURL) {
-    throw new Error("PayPal approval URL was not returned");
+    throw new Error('PayPal approval URL was not returned');
   }
 
   return data;
 };
 
 export const capturePaymentOrder = async (orderId) => {
-  const response = await fetch(
-    `${API_BASE_URL}/api/payments/${encodeURIComponent(orderId)}/capture`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  );
+  const response = await api.post(`/payments/${encodeURIComponent(orderId)}/capture`);
+  const data = response.data;
 
-  const data = await response.json();
-
-  if (!response.ok || !data.success) {
-    throw new Error(data.message || "Unable to capture payment");
+  if (!data || !data.success) {
+    throw new Error(data?.message || 'Unable to capture payment');
   }
 
   return data;
+};
+
+export const getTransactions = async (groupId = null) => {
+  const response = await api.get('/payments/transactions', {
+    params: groupId ? { groupId } : {},
+  });
+  return response.data;
+};
+
+export default {
+  createPaymentOrder,
+  capturePaymentOrder,
+  getTransactions,
 };

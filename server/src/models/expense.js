@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const splitSchema = new mongoose.Schema(
@@ -8,13 +7,11 @@ const splitSchema = new mongoose.Schema(
       ref: "User",
       required: true
     },
-
     amount: {
       type: Number,
       required: true,
       min: 0
     },
-
     status: {
       type: String,
       enum: ["pending", "approved", "paid"],
@@ -26,22 +23,50 @@ const splitSchema = new mongoose.Schema(
 
 const expenseSchema = new mongoose.Schema(
   {
-    group: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Group",
-      required: true
-    },
-
     title: {
       type: String,
       required: true,
       trim: true
     },
 
-    totalAmount: {
+    category: {
+      type: String,
+      enum: [
+        "Food",
+        "Transport",
+        "Shopping",
+        "Entertainment",
+        "Bills",
+        "Health",
+        "Travel",
+        "Other"
+      ],
+      default: "Other"
+    },
+
+    amount: {
       type: Number,
       required: true,
       min: 0
+    },
+
+    totalAmount: {
+      type: Number,
+      min: 0,
+      default: function () {
+        return this.amount;
+      }
+    },
+
+    date: {
+      type: String,
+      default: () => new Date().toISOString().split("T")[0]
+    },
+
+    description: {
+      type: String,
+      default: "",
+      trim: true
     },
 
     paidBy: {
@@ -50,20 +75,35 @@ const expenseSchema = new mongoose.Schema(
       required: true
     },
 
+    group: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+      default: null
+    },
+
     splitType: {
       type: String,
-      enum: ["equal", "custom"],
-      required: true
+      enum: ["equal", "custom", "none"],
+      default: "none"
     },
 
     splits: {
       type: [splitSchema],
-      required: true
+      default: []
     }
   },
   { timestamps: true }
 );
 
-const Expense = mongoose.model("Expense", expenseSchema);
+// Synchronous hook to ensure amount and totalAmount stay synchronized
+expenseSchema.pre("save", function () {
+  if (this.amount !== undefined && this.totalAmount === undefined) {
+    this.totalAmount = this.amount;
+  } else if (this.totalAmount !== undefined && this.amount === undefined) {
+    this.amount = this.totalAmount;
+  }
+});
+
+const Expense = mongoose.models.Expense || mongoose.model("Expense", expenseSchema);
 
 export default Expense;

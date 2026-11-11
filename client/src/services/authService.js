@@ -21,9 +21,8 @@ export const authService = {
   },
 
   // Fetch current authenticated user's profile
-  // Note: Backend router specifically registers router.post("/me", protect, getMe)
   async getMe() {
-    const response = await api.post('/auth/me');
+    const response = await api.get('/auth/me');
     return response.data;
   },
 
@@ -57,4 +56,3 @@ export const authService = {
 };
 
 export default authService;
-

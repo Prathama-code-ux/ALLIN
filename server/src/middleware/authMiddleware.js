@@ -15,15 +15,12 @@ export const protect = async (req, res, next) => {
     // 2. Extract token
     const token = authHeader.split(" ")[1];
 
-    // 3. Verify token
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
-    );
+    // 3. Verify token with fallback secret
+    const jwtSecret = process.env.JWT_SECRET || "allin_default_super_secret_jwt_key_2026";
+    const decoded = jwt.verify(token, jwtSecret);
 
     // 4. Find user in database
-    const user = await User.findById(decoded.userId)
-      .select("-passwordHash");
+    const user = await User.findById(decoded.userId).select("-passwordHash");
 
     if (!user) {
       return res.status(401).json({

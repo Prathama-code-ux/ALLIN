@@ -4,23 +4,14 @@ import Logo from '../common/Logo';
 import Button from '../common/Button';
 
 export default function SplashScreen({ onNavigateLogin, onNavigateRegister }) {
-  // Animation stages:
-  // 0: Initial dark screen
-  // 1: Center logo fades in with cyan glow
-  // 2: Logo smoothly transitions upward
-  // 3: Welcome messaging and buttons fade in
   const hasSeen = typeof window !== 'undefined' && sessionStorage.getItem('allin_intro_seen');
   const [stage, setStage] = useState(hasSeen ? 3 : 0);
 
   useEffect(() => {
     if (hasSeen) return;
 
-    // Fast, crisp animation timeline:
-    // 0 -> 1: 300ms
     const t1 = setTimeout(() => setStage(1), 300);
-    // 1 -> 2: 1300ms (logo begins gliding upward)
     const t2 = setTimeout(() => setStage(2), 1400);
-    // 2 -> 3: 1900ms (welcome text and CTA options appear)
     const t3 = setTimeout(() => {
       setStage(3);
       sessionStorage.setItem('allin_intro_seen', 'true');
@@ -39,19 +30,19 @@ export default function SplashScreen({ onNavigateLogin, onNavigateRegister }) {
   };
 
   return (
-    <div className="relative min-h-screen w-full bg-[#080B0D] flex flex-col items-center justify-center px-4 overflow-hidden select-none">
+    <div className="relative min-h-screen w-full bg-[#090810] flex flex-col items-center justify-center px-4 overflow-hidden select-none">
       {/* Background ambient lighting effects */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[340px] md:w-[600px] h-[340px] md:h-[600px] bg-[#00E5D4]/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-[200px] h-[200px] bg-[#087E78]/15 rounded-full blur-[90px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[340px] md:w-[600px] h-[340px] md:h-[600px] bg-[#a66bff]/15 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-10 right-10 w-[200px] h-[200px] bg-[#6125c8]/20 rounded-full blur-[90px] pointer-events-none" />
 
       {/* Subtle Grid Pattern Overlay */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
 
-      {/* Fast skip button during opening sequence if user wants instant action */}
+      {/* Fast skip button during opening sequence */}
       {stage < 3 && (
         <button
           onClick={handleSkip}
-          className="absolute top-6 right-6 text-xs font-medium text-[#64748B] hover:text-[#00E5D4] transition-colors z-20 cursor-pointer"
+          className="absolute top-6 right-6 text-xs font-medium text-[#7E8B99] hover:text-[#a66bff] transition-colors z-20 cursor-pointer"
         >
           Skip Intro
         </button>
@@ -72,7 +63,7 @@ export default function SplashScreen({ onNavigateLogin, onNavigateRegister }) {
           <Logo size={stage >= 2 ? 'lg' : 'xl'} animated={stage <= 2} showTagline={false} />
         </div>
 
-        {/* Content Section: Message & Options (Appears in stage 3) */}
+        {/* Content Section: Message & Options */}
         <div
           className={`w-full flex flex-col items-center transition-all duration-700 ease-out ${
             stage >= 2
@@ -83,7 +74,7 @@ export default function SplashScreen({ onNavigateLogin, onNavigateRegister }) {
           {/* Welcome Headline */}
           <div className="mt-4 mb-2">
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#F3F6F6] font-['Plus_Jakarta_Sans']">
-              Payments, <span className="text-[#00E5D4] drop-shadow-[0_0_15px_rgba(0,229,212,0.4)]">together.</span>
+              Payments, <span className="text-[#a66bff] drop-shadow-[0_0_15px_rgba(166,107,255,0.5)]">together.</span>
             </h1>
             <p className="mt-3 text-base text-[#94A3B8] font-normal leading-relaxed max-w-sm mx-auto">
               Split expenses. Pay together. Stay connected.
@@ -91,52 +82,50 @@ export default function SplashScreen({ onNavigateLogin, onNavigateRegister }) {
           </div>
 
           {/* Fintech Trust Badges */}
-          <div className="flex items-center justify-center gap-4 my-6 py-2 px-4 rounded-full bg-[#111719]/60 border border-white/5 backdrop-blur-md text-xs text-[#94A3B8]">
+          <div className="flex items-center justify-center gap-4 my-6 py-2 px-4 rounded-full bg-[#171426]/70 border border-white/5 backdrop-blur-md text-xs text-[#94A3B8]">
             <span className="flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-[#00E5D4]" /> Instant Splits
+              <Zap className="w-3.5 h-3.5 text-[#a66bff]" /> Instant Splits
             </span>
             <span className="w-1 h-1 rounded-full bg-white/20" />
             <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#00E5D4]" /> Secure
+              <ShieldCheck className="w-3.5 h-3.5 text-[#a66bff]" /> Secure PayPal
             </span>
             <span className="w-1 h-1 rounded-full bg-white/20" />
             <span className="flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-[#00E5D4]" /> Groups
+              <Users className="w-3.5 h-3.5 text-[#a66bff]" /> Group Pool
             </span>
           </div>
 
-          {/* Action Options: Sign In & Create Account */}
-          <div className="w-full space-y-3.5 mt-2">
+          {/* Auth Action Buttons */}
+          <div className="w-full flex flex-col gap-3 mt-2">
             <Button
               variant="primary"
               size="lg"
+              onClick={onNavigateRegister}
               fullWidth
-              onClick={onNavigateLogin}
               icon={ArrowRight}
-              iconPosition="right"
-              className="font-semibold shadow-[0_0_25px_rgba(0,229,212,0.3)] hover:shadow-[0_0_35px_rgba(0,229,212,0.5)]"
+              className="shadow-[0_0_25px_rgba(166,107,255,0.4)]"
             >
-              Sign In
+              Get Started
             </Button>
 
             <Button
               variant="secondary"
               size="lg"
+              onClick={onNavigateLogin}
               fullWidth
-              onClick={onNavigateRegister}
-              className="border-white/10 hover:border-[#00E5D4]/40 bg-[#111719]/80"
+              className="border-white/10 hover:border-[#a66bff]/40 text-[#F3F6F6]"
             >
-              Create Account
+              Log In to ALLIN
             </Button>
           </div>
 
-          {/* Mobile footer hint */}
-          <p className="mt-8 text-xs text-[#64748B]">
-            Protected by end-to-end fintech encryption & PayPal integration
+          {/* Subtext info */}
+          <p className="mt-6 text-xs text-[#7E8B99]">
+            Protected by end-to-end encryption & PayPal Sandbox security.
           </p>
         </div>
       </div>
     </div>
   );
 }
-

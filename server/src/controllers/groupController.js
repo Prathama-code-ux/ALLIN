@@ -1,0 +1,261 @@
+import mongoose from "mongoose";
+import crypto from "crypto";
+import Group from "../models/Group.js";
+import Payment from "../models/payment.js";
+import User from "../models/User.js";
+
+export const createGroup = async (req, res) => {
+    try {
+        const { name, description, targetAmount } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({
+                message: "Group name is required"
+            });
+        }
+
+        const inviteCode = crypto.randomBytes(4).toString("hex").toUpperCase();
+
+        const group = await Group.create({
+            name: name.trim(),
+            description: (description || "").trim(),
+            targetAmount: targetAmount && !isNaN(targetAmount) ? Number(targetAmount) : 200,
+            createdBy: req.user._id,
+            members: [req.user._id],
+            inviteCode
+        });
+
+        return res.status(201).json({
+            message: "Group created successfully",
+            group: {
+                id: group._id,
+                _id: group._id,
+                name: group.name,
+                description: group.description,
+                targetAmount: group.targetAmount,
+                createdBy: group.createdBy,
+                members: group.members,
+                inviteCode: group.inviteCode
+            }
+        });
+    } catch (error) {
+        console.error("Create group error:", error);
+        return res.status(500).json({
+            message: "Internal server error"
+        });
+    }
+};
+
+export const getMyGroups = async (req, res) => {
+    try {
+        let groups = await Group.find({
+            members: req.user._id
+        })
+        .populate("createdBy", "name email")
+        .populate("members", "name email");
+
+        // If user has no groups, create an initial "ALLIN Squad" workspace group automatically
+        if (groups.length === 0) {
+            const inviteCode = crypto.randomBytes(4).toString("hex").toUpperCase();
+            const defaultGroup = await Group.create({
+                name: "ALLIN Squad",
+                description: "Collaborative payment crew",
+                targetAmount: 200,
+                createdBy: req.user._id,
+                members: [req.user._id],
+                inviteCode
+            });
+
+            groups = [await Group.findById(defaultGroup._id)
+                .populate("createdBy", "name email")
+                .populate("members", "name email")];
+        }
+
+        return res.status(200).json({
+            count: groups.length,
+            groups
+        });
+
+    } catch (error) {
+        console.error("Get groups error:", error);
+        return res.status(500).json({
+            message: "Internal server error"
+        });
+    }
+};
+
+export const joinGroup = async (req, res) => {
+    try {
+        const { inviteCode } = req.body;
+
+        if (!inviteCode || !inviteCode.trim()) {
+            return res.status(400).json({
+                message: "Invite code is required"
+            });
+        }
+
+        const group = await Group.findOne({
+            inviteCode: inviteCode.trim().toUpperCase()
+        });
+
+        if (!group) {
+            return res.status(404).json({
+                message: "Invalid invite code"
+            });
+        }
+
+        const alreadyMember = group.members.some(
+            memberId => memberId.equals(req.user._id)
+        );
+
+        if (alreadyMember) {
+            return res.status(409).json({
+                message: "You are already a member of this group"
+            });
+        }
+
+        group.members.push(req.user._id);
+        await group.save();
+
+        return res.status(200).json({
+            message: "Joined group successfully",
+            group
+        });
+
+    } catch (error) {
+        console.error("Join group error:", error);
+        return res.status(500).json({
+            message: "Internal server error"
+        });
+    }
+};
+
+export const getGroupById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: "Invalid group ID"
+            });
+        }
+
+        const group = await Group.findById(id)
+            .populate("createdBy", "name email")
+            .populate("members", "name email");
+
+        if (!group) {
+            return res.status(404).json({
+                message: "Group not found"
+            });
+        }
+
+        const isMember = group.members.some(
+            member => member._id.equals(req.user._id)
+        );
+
+        if (!isMember) {
+            return res.status(403).json({
+                message: "You are not a member of this group"
+            });
+        }
+
+        return res.status(200).json({
+            group
+        });
+
+    } catch (error) {
+        console.error("Get group error:", error);
+        return res.status(500).json({
+            message: "Internal server error"
+        });
+    }
+};
+
+// Calculate group contributions dynamically from DB payments
+export const getGroupContributions = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: "Invalid group ID"
+            });
+        }
+
+        const group = await Group.findById(id)
+            .populate("createdBy", "name email")
+            .populate("members", "name email");
+
+        if (!group) {
+            return res.status(404).json({
+                message: "Group not found"
+            });
+        }
+
+        const targetAmount = Number(group.targetAmount || 200);
+        const memberCount = Math.max(group.members.length, 1);
+        const perMemberTarget = targetAmount / memberCount;
+
+        // Fetch completed payments for this group
+        const payments = await Payment.find({
+            group: group._id,
+            status: "captured"
+        });
+
+        // Group payments by user
+        const paymentSums = {};
+        let totalPool = 0;
+
+        payments.forEach(p => {
+            const uid = p.user ? String(p.user) : "unassigned";
+            paymentSums[uid] = (paymentSums[uid] || 0) + Number(p.amount);
+            totalPool += Number(p.amount);
+        });
+
+        const contributions = group.members.map(member => {
+            const uid = String(member._id);
+            const userPaid = paymentSums[uid] || 0;
+            const percentage = targetAmount > 0
+                ? Math.min(Math.round((userPaid / targetAmount) * 100), 100)
+                : 0;
+
+            const isAdmin = group.createdBy._id.equals(member._id);
+
+            const initials = (member.name || "U")
+                .split(" ")
+                .map(n => n[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
+
+            return {
+                id: member._id,
+                userId: member._id,
+                name: member.name,
+                initials,
+                role: isAdmin ? "Admin" : "Member",
+                amount: userPaid > 0 ? Number(userPaid.toFixed(2)) : Number(perMemberTarget.toFixed(2)),
+                paidAmount: Number(userPaid.toFixed(2)),
+                percentage,
+                status: userPaid > 0 ? "COMPLETED" : "PENDING"
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            groupId: group._id,
+            groupName: group.name,
+            targetAmount,
+            totalPool: Number(totalPool.toFixed(2)),
+            remaining: Math.max(0, Number((targetAmount - totalPool).toFixed(2))),
+            contributions
+        });
+
+    } catch (error) {
+        console.error("Get group contributions error:", error);
+        return res.status(500).json({
+            message: "Failed to calculate contributions"
+        });
+    }
+};
