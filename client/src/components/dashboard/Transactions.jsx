@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 
 const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
 
 export default function Transactions({ transactions = [], paymentCompleted }) {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
 
   const filtered = transactions.filter((txn) => {
     const q = search.toLowerCase();
+
     return (
-      (txn.name && txn.name.toLowerCase().includes(q)) ||
-      (txn.id && txn.id.toLowerCase().includes(q)) ||
-      (txn.status && txn.status.toLowerCase().includes(q))
+      String(txn.name || "")
+        .toLowerCase()
+        .includes(q) ||
+      String(txn.id || txn._id || "")
+        .toLowerCase()
+        .includes(q) ||
+      String(txn.status || "")
+        .toLowerCase()
+        .includes(q)
     );
   });
 
@@ -21,6 +28,7 @@ export default function Transactions({ transactions = [], paymentCompleted }) {
           <span className="eyebrow">ACTIVITY LOG</span>
           <h2>Recent Transactions</h2>
         </div>
+
         <span className="member-count">{filtered.length} TRANSACTIONS</span>
       </div>
 
@@ -38,26 +46,47 @@ export default function Transactions({ transactions = [], paymentCompleted }) {
         <div className="empty-state-card">
           <span>⇄</span>
           <h3>No transactions recorded yet</h3>
-          <p>Approved PayPal payments and contributions will appear here in real time.</p>
+          <p>Approved PayPal payments and contributions will appear here.</p>
         </div>
       ) : (
         <div className="transactions-list">
           {filtered.map((txn) => {
-            const isCompleted =
-              txn.status === 'COMPLETED' || (txn.isRecent && paymentCompleted);
+            const status = String(txn.status || "")
+              .trim()
+              .toUpperCase();
+
+            // Only successfully captured payments are completed.
+            const isCompleted = ["COMPLETED", "CAPTURED"].includes(status);
+
+            const isFailed = ["FAILED", "CANCELLED", "CANCELED"].includes(
+              status,
+            );
+
+            const displayStatus = isCompleted
+              ? "COMPLETED"
+              : isFailed
+                ? "FAILED"
+                : "PENDING";
 
             return (
               <div key={txn.id || txn._id} className="txn-row">
                 <div className="txn-left">
-                  <div className="txn-avatar">{txn.initials || 'TX'}</div>
+                  <div className="txn-avatar">{txn.initials || "TX"}</div>
+
                   <div className="txn-info">
                     <div className="flex items-center gap-2">
-                      <strong className="text-sm text-[#F3F6F6]">{txn.name}</strong>
+                      <strong className="text-sm text-[#F3F6F6]">
+                        {txn.name || "Payment"}
+                      </strong>
+
                       <span className="txn-id font-mono text-[11px] text-[#7E8B99]">
-                        {txn.id}
+                        {txn.id || txn._id}
                       </span>
                     </div>
-                    <span className="txn-date text-xs text-[#7E8B99]">{txn.date}</span>
+
+                    <span className="txn-date text-xs text-[#7E8B99]">
+                      {txn.date || "Date unavailable"}
+                    </span>
                   </div>
                 </div>
 
@@ -65,16 +94,17 @@ export default function Transactions({ transactions = [], paymentCompleted }) {
                   <span className="txn-amount text-sm font-semibold text-[#F3F6F6]">
                     +{formatMoney(txn.amount)}
                   </span>
+
                   <span
                     className={`status-pill ${
                       isCompleted
-                        ? 'status-completed'
-                        : txn.status === 'FAILED'
-                        ? 'status-failed'
-                        : 'status-pending'
+                        ? "status-completed"
+                        : isFailed
+                          ? "status-failed"
+                          : "status-pending"
                     }`}
                   >
-                    {isCompleted ? 'COMPLETED' : txn.status}
+                    {displayStatus}
                   </span>
                 </div>
               </div>
