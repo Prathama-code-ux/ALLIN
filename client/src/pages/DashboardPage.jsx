@@ -200,10 +200,10 @@ export default function DashboardPage() {
 
       capturePayment();
     }
-  }, [activeGroup, loadGroupContributions, loadTransactions]);
+  }, [activeGroup, loadGroupContributions, loadTransactions, loadExpenses]);
 
-  // Initiate PayPal order creation
-  const handlePayNow = async (shareAmount = 55.35) => {
+  // Initiate PayPal order creation for an expense split or group pool
+  const handlePayNow = async (payTarget) => {
     if (paymentLoading || paymentCompleted) return;
 
     try {
@@ -211,11 +211,25 @@ export default function DashboardPage() {
       setPaymentError('');
       setPaymentMessage('Connecting to PayPal Sandbox...');
 
-      const result = await createPaymentOrder(
-        shareAmount,
-        'USD',
-        activeGroup?._id || null
-      );
+      let payload = {};
+
+      if (typeof payTarget === 'object' && payTarget !== null) {
+        payload = {
+          expenseId: payTarget.expenseId || null,
+          groupId: payTarget.groupId || activeGroup?._id || null,
+          amount: payTarget.amount || undefined,
+          currency: 'USD',
+        };
+      } else {
+        // If a number was passed directly
+        payload = {
+          amount: Number(payTarget || 55.35),
+          currency: 'USD',
+          groupId: activeGroup?._id || null,
+        };
+      }
+
+      const result = await createPaymentOrder(payload);
 
       if (!result.approvalURL) {
         throw new Error('PayPal approval URL was not returned by server.');
@@ -228,6 +242,27 @@ export default function DashboardPage() {
       setPaymentError(error.message || 'Unable to initiate payment.');
       setPaymentMessage('');
       setPaymentLoading(false);
+    }
+  };
+
+  // Review and approve an individual expense split
+  const handleApproveSplit = async (expenseId) => {
+    try {
+      setPaymentMessage('Reviewing and approving your split share...');
+      setPaymentError('');
+      await expenseService.approveSplit(expenseId);
+      setPaymentMessage('Your split has been approved! Ready for PayPal Sandbox payment.');
+
+      if (activeGroup?._id) {
+        await Promise.all([
+          loadGroupContributions(activeGroup._id),
+          loadExpenses(activeGroup._id),
+        ]);
+      }
+    } catch (error) {
+      console.error('Split approval failed:', error);
+      setPaymentError(error.response?.data?.message || error.message || 'Unable to approve split.');
+      setPaymentMessage('');
     }
   };
 
@@ -256,12 +291,17 @@ export default function DashboardPage() {
   const currentUserContribution = contributions.find(
     (c) => c.userId === user?.id || c.id === user?.id
   );
+  const myPendingSplits = currentUserContribution?.pendingSplits || [];
+  const nextPendingSplit = myPendingSplits[0] || null;
+
   const myPaymentStatus =
     currentUserContribution?.status === 'COMPLETED' || paymentCompleted
       ? 'COMPLETED'
       : 'PENDING';
 
-  const userShare = currentUserContribution?.amount || 55.35;
+  const userShare = currentUserContribution?.pendingAmount !== undefined && currentUserContribution?.pendingAmount > 0
+    ? currentUserContribution.pendingAmount
+    : (currentUserContribution?.amount || 55.35);
 
   const totalExpenseSum = expenses.reduce(
     (sum, e) => sum + Number(e.amount || 0),
@@ -379,7 +419,15 @@ export default function DashboardPage() {
 
               {/* Pool & Contribution Stats */}
               <PaymentOverview
-                onPayNow={handlePayNow}
+                onPayNow={(target) => {
+                  if (target) {
+                    handlePayNow(target);
+                  } else if (nextPendingSplit) {
+                    handlePayNow({ expenseId: nextPendingSplit.expenseId, groupId: activeGroup?._id });
+                  } else {
+                    handlePayNow({ groupId: activeGroup?._id, amount: userShare });
+                  }
+                }}
                 paymentLoading={paymentLoading}
                 paymentCompleted={paymentCompleted}
                 totalPool={poolData.totalPool}
@@ -387,6 +435,9 @@ export default function DashboardPage() {
                 totalExpenses={totalExpenseSum}
                 userShare={userShare}
                 myPaymentStatus={myPaymentStatus}
+                nextPendingSplit={nextPendingSplit}
+                onApproveSplit={handleApproveSplit}
+                activeGroup={activeGroup}
               />
 
               {/* Split & Transactions Grid */}
@@ -394,6 +445,7 @@ export default function DashboardPage() {
                 <Contributions
                   contributions={contributions}
                   onPayNow={handlePayNow}
+                  onApproveSplit={handleApproveSplit}
                   paymentLoading={paymentLoading}
                   paymentCompleted={paymentCompleted}
                   currentUserId={user?.id}

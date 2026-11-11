@@ -27,6 +27,11 @@ export const expenseService = {
     const response = await api.delete(`/expenses/${id}`);
     return response.data;
   },
+
+  async approveSplit(id) {
+    const response = await api.patch(`/expenses/${id}/splits/approve`);
+    return response.data;
+  },
 };
 
 export default expenseService;

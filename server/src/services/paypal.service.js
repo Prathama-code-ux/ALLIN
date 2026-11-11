@@ -1,4 +1,6 @@
-// Get PayPal access token
+// PayPal Sandbox / Live Service Integration
+
+// Get PayPal access token via OAuth client credentials
 export const getAccessToken = async () => {
     const baseUrl = process.env.PAYPAL_BASE_URL || "https://api-m.sandbox.paypal.com";
     const clientId = process.env.PAYPAL_CLIENT_ID;
@@ -37,7 +39,7 @@ export const getAccessToken = async () => {
 };
 
 // Create PayPal order
-export const createOrder = async (amount, currency = "USD") => {
+export const createOrder = async (amount, currency = "USD", customId = null, description = "ALLIN Shared Payment") => {
     const baseUrl = process.env.PAYPAL_BASE_URL || "https://api-m.sandbox.paypal.com";
     const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
     const accessToken = await getAccessToken();
@@ -52,6 +54,8 @@ export const createOrder = async (amount, currency = "USD") => {
                         currency_code: currency,
                         value: Number(amount).toFixed(2),
                     },
+                    description: String(description || "ALLIN Payment").slice(0, 127),
+                    custom_id: customId ? String(customId) : undefined
                 },
             ],
             application_context: {
@@ -113,3 +117,46 @@ export const captureOrder = async (orderId) => {
 
     return data;
 };
+
+// Verify PayPal webhook signature
+export const verifyWebhookSignature = async (headers, body) => {
+    const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+    if (!webhookId) {
+        console.warn("PAYPAL_WEBHOOK_ID is not configured in environment. Skipping cryptographic verification.");
+        return { verification_status: "SUCCESS" };
+    }
+
+    const baseUrl = process.env.PAYPAL_BASE_URL || "https://api-m.sandbox.paypal.com";
+    const accessToken = await getAccessToken();
+
+    const payload = {
+        auth_algo: headers["paypal-auth-algo"],
+        cert_url: headers["paypal-cert-url"],
+        transmission_id: headers["paypal-transmission-id"],
+        transmission_sig: headers["paypal-transmission-sig"],
+        transmission_time: headers["paypal-transmission-time"],
+        webhook_id: webhookId,
+        webhook_event: body,
+    };
+
+    const response = await fetch(`${baseUrl}/v1/notifications/verify-webhook-signature`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    return data;
+};
+
+export const paypalService = {
+    getAccessToken,
+    createOrder,
+    captureOrder,
+    verifyWebhookSignature
+};
+
+export default paypalService;

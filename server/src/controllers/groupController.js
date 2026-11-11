@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import crypto from "crypto";
 import Group from "../models/Group.js";
 import Payment from "../models/payment.js";
+import Expense from "../models/expense.js";
 import User from "../models/User.js";
 
 export const createGroup = async (req, res) => {
@@ -172,7 +173,7 @@ export const getGroupById = async (req, res) => {
     }
 };
 
-// Calculate group contributions dynamically from DB payments
+// Calculate group contributions dynamically from DB payments and expense splits
 export const getGroupContributions = async (req, res) => {
     try {
         const { id } = req.params;
@@ -203,6 +204,9 @@ export const getGroupContributions = async (req, res) => {
             status: "captured"
         });
 
+        // Fetch group expenses with splits
+        const groupExpenses = await Expense.find({ group: group._id });
+
         // Group payments by user
         const paymentSums = {};
         let totalPool = 0;
@@ -213,9 +217,41 @@ export const getGroupContributions = async (req, res) => {
             totalPool += Number(p.amount);
         });
 
+        // Group expense splits by member
+        const memberSplits = {};
+        let totalExpensesAmount = 0;
+
+        groupExpenses.forEach(exp => {
+            totalExpensesAmount += Number(exp.amount || 0);
+            (exp.splits || []).forEach(s => {
+                const uid = String(s.user);
+                if (!memberSplits[uid]) {
+                    memberSplits[uid] = [];
+                }
+                memberSplits[uid].push({
+                    expenseId: exp._id,
+                    expenseTitle: exp.title,
+                    amount: s.amount,
+                    status: s.status,
+                    approvedAt: s.approvedAt,
+                    paidAt: s.paidAt
+                });
+            });
+        });
+
         const contributions = group.members.map(member => {
             const uid = String(member._id);
             const userPaid = paymentSums[uid] || 0;
+            const splits = memberSplits[uid] || [];
+            const userOwedFromSplits = splits.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+            const pendingSplits = splits.filter(s => s.status !== "paid");
+            const pendingAmount = pendingSplits.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+
+            // Default share: if member has pending splits, show pending splits; otherwise show equal share
+            const defaultShare = userOwedFromSplits > 0
+                ? (pendingAmount > 0 ? pendingAmount : userOwedFromSplits)
+                : (userPaid > 0 ? userPaid : perMemberTarget);
+
             const percentage = targetAmount > 0
                 ? Math.min(Math.round((userPaid / targetAmount) * 100), 100)
                 : 0;
@@ -229,16 +265,25 @@ export const getGroupContributions = async (req, res) => {
                 .slice(0, 2)
                 .toUpperCase();
 
+            // Status: COMPLETED if no pending splits and has contributed, otherwise PENDING
+            const isCompleted = userOwedFromSplits > 0
+                ? pendingSplits.length === 0 && userPaid > 0
+                : userPaid > 0;
+
             return {
                 id: member._id,
                 userId: member._id,
                 name: member.name,
                 initials,
                 role: isAdmin ? "Admin" : "Member",
-                amount: userPaid > 0 ? Number(userPaid.toFixed(2)) : Number(perMemberTarget.toFixed(2)),
+                amount: Number(defaultShare.toFixed(2)),
                 paidAmount: Number(userPaid.toFixed(2)),
+                totalOwed: Number(userOwedFromSplits.toFixed(2)),
+                pendingAmount: Number(pendingAmount.toFixed(2)),
                 percentage,
-                status: userPaid > 0 ? "COMPLETED" : "PENDING"
+                status: isCompleted ? "COMPLETED" : "PENDING",
+                splits,
+                pendingSplits
             };
         });
 
@@ -249,6 +294,7 @@ export const getGroupContributions = async (req, res) => {
             targetAmount,
             totalPool: Number(totalPool.toFixed(2)),
             remaining: Math.max(0, Number((targetAmount - totalPool).toFixed(2))),
+            totalExpenses: Number(totalExpensesAmount.toFixed(2)),
             contributions
         });
 

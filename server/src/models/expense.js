@@ -16,6 +16,14 @@ const splitSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "approved", "paid"],
       default: "pending"
+    },
+    approvedAt: {
+      type: Date,
+      default: null
+    },
+    paidAt: {
+      type: Date,
+      default: null
     }
   },
   { _id: false }

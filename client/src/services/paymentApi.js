@@ -1,11 +1,18 @@
 import api from '../api/client';
 
-export const createPaymentOrder = async (amount, currency = 'USD', groupId = null) => {
-  const response = await api.post('/payments/create-order', {
-    amount,
-    currency,
-    groupId,
-  });
+export const createPaymentOrder = async (amountOrParams, currency = 'USD', groupId = null) => {
+  let payload;
+  if (typeof amountOrParams === 'object' && amountOrParams !== null) {
+    payload = amountOrParams;
+  } else {
+    payload = {
+      amount: amountOrParams,
+      currency,
+      groupId,
+    };
+  }
+
+  const response = await api.post('/payments/create-order', payload);
 
   const data = response.data;
   if (!data || !data.success) {

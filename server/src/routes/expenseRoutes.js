@@ -5,13 +5,14 @@ import {
     getExpenseSummary,
     getExpenseById,
     updateExpense,
-    deleteExpense
+    deleteExpense,
+    approveExpenseSplit
 } from "../controllers/expense.controller.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Optional auth helper: if token provided, sets req.user, but doesn't reject if not
+// Optional auth helper: if token provided, sets req.user for personalization
 const optionalAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -20,11 +21,15 @@ const optionalAuth = (req, res, next) => {
     next();
 };
 
-router.post("/", optionalAuth, createExpense);
+// Public/Optional read routes (backward compatible)
 router.get("/", optionalAuth, getExpenses);
 router.get("/summary", optionalAuth, getExpenseSummary);
 router.get("/:id", optionalAuth, getExpenseById);
-router.put("/:id", optionalAuth, updateExpense);
-router.delete("/:id", optionalAuth, deleteExpense);
+
+// Strictly protected mutation routes
+router.post("/", protect, createExpense);
+router.put("/:id", protect, updateExpense);
+router.delete("/:id", protect, deleteExpense);
+router.patch("/:id/splits/approve", protect, approveExpenseSplit);
 
 export default router;

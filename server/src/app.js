@@ -7,6 +7,7 @@ import authRoutes from "./routes/authRoutes.js";
 import groupRoutes from "./routes/groupRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import paymentRoutes from "./routes/payment.route.js";
+import register, { httpRequestDuration } from "./config/metrics.js";
 
 const app = express();
 
@@ -36,6 +37,35 @@ app.use(
 );
 
 app.use(express.json());
+
+// Prometheus HTTP request duration tracking middleware
+app.use((req, res, next) => {
+    const start = process.hrtime();
+    res.on("finish", () => {
+        const diff = process.hrtime(start);
+        const durationInSeconds = diff[0] + diff[1] / 1e9;
+        const routePath = req.baseUrl ? `${req.baseUrl}${req.path}` : req.path;
+        httpRequestDuration.observe(
+            {
+                method: req.method,
+                route: routePath,
+                status_code: res.statusCode
+            },
+            durationInSeconds
+        );
+    });
+    next();
+});
+
+// Prometheus scraping endpoint
+app.get("/metrics", async (req, res) => {
+    try {
+        res.set("Content-Type", register.contentType);
+        res.end(await register.metrics());
+    } catch (err) {
+        res.status(500).end(err.message);
+    }
+});
 
 // API routes
 app.use("/api/auth", authRoutes);

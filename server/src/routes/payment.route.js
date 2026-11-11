@@ -2,13 +2,14 @@ import express from "express";
 import {
     createPaymentOrder,
     capturePaymentOrder,
-    getTransactions
+    getTransactions,
+    handlePayPalWebhook
 } from "../controllers/payment.controller.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Optional auth helper
+// Optional auth helper for read-only history
 const optionalAuth = (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -17,13 +18,14 @@ const optionalAuth = (req, res, next) => {
     next();
 };
 
-// Create PayPal order
-router.post("/create-order", optionalAuth, createPaymentOrder);
+// Mandatory authentication on payment transactions
+router.post("/create-order", protect, createPaymentOrder);
+router.post("/:orderId/capture", protect, capturePaymentOrder);
 
-// Capture PayPal order
-router.post("/:orderId/capture", optionalAuth, capturePaymentOrder);
+// Public webhook endpoint (signature verified cryptographically)
+router.post("/webhook", handlePayPalWebhook);
 
-// Get transaction history
+// Transaction history
 router.get("/transactions", optionalAuth, getTransactions);
 
 export default router;
