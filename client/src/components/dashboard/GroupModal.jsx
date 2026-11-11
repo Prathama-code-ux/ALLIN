@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { X, Users } from 'lucide-react';
-import groupService from '../../services/groupService';
+import React, { useState, useEffect } from "react";
+import { X, Users } from "lucide-react";
+import groupService from "../../services/groupService";
 
 export default function GroupModal({
   isOpen,
@@ -9,30 +9,37 @@ export default function GroupModal({
   activeGroup,
   onSelectGroup,
   onGroupUpdated,
+  initialTab = "switch",
+  onGroupCreated,
 }) {
-  const [activeTab, setActiveTab] = useState('switch'); // 'switch' | 'create' | 'join'
+  const [activeTab, setActiveTab] = useState("switch"); // 'switch' | 'create' | 'join'
   const [createForm, setCreateForm] = useState({
-    name: '',
-    description: '',
-    targetAmount: '200',
+    name: "",
+    description: "",
+    targetAmount: "200",
   });
-  const [joinCode, setJoinCode] = useState('');
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
+  const [joinCode, setJoinCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   if (!isOpen) return null;
 
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!createForm.name.trim()) {
-      setError('Please provide a group name');
+      setError("Please provide a group name");
       return;
     }
 
     setSubmitting(true);
-    setError('');
-    setSuccess('');
+    setError("");
+    setSuccess("");
 
     try {
       const res = await groupService.createGroup({
@@ -40,15 +47,19 @@ export default function GroupModal({
         description: createForm.description.trim(),
         targetAmount: Number(createForm.targetAmount) || 200,
       });
+      await onGroupUpdated(res.group);
+      await onGroupCreated?.(res.group);
 
       setSuccess(`Group "${res.group.name}" created!`);
-      setCreateForm({ name: '', description: '', targetAmount: '200' });
+      setCreateForm({ name: "", description: "", targetAmount: "200" });
       await onGroupUpdated(res.group);
       setTimeout(() => {
         onClose();
       }, 1000);
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Failed to create group');
+      setError(
+        err.response?.data?.message || err.message || "Failed to create group",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -57,24 +68,28 @@ export default function GroupModal({
   const handleJoin = async (e) => {
     e.preventDefault();
     if (!joinCode.trim()) {
-      setError('Please provide an invite code');
+      setError("Please provide an invite code");
       return;
     }
 
     setSubmitting(true);
-    setError('');
-    setSuccess('');
+    setError("");
+    setSuccess("");
 
     try {
       const res = await groupService.joinGroup(joinCode.trim().toUpperCase());
       setSuccess(`Joined "${res.group.name}" successfully!`);
-      setJoinCode('');
+      setJoinCode("");
       await onGroupUpdated(res.group);
       setTimeout(() => {
         onClose();
       }, 1000);
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Invalid or expired invite code');
+      setError(
+        err.response?.data?.message ||
+          err.message ||
+          "Invalid or expired invite code",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -89,7 +104,9 @@ export default function GroupModal({
         <div className="expense-modal-header">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-[#a66bff]" />
-            <h3 className="text-base font-bold text-[#F3F6F6]">Crew & Groups</h3>
+            <h3 className="text-base font-bold text-[#F3F6F6]">
+              Crew & Groups
+            </h3>
           </div>
           <button
             type="button"
@@ -106,14 +123,14 @@ export default function GroupModal({
           <button
             type="button"
             className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'switch'
-                ? 'bg-[#a66bff] text-white shadow-sm'
-                : 'text-[#94A3B8] hover:text-[#F3F6F6]'
+              activeTab === "switch"
+                ? "bg-[#a66bff] text-white shadow-sm"
+                : "text-[#94A3B8] hover:text-[#F3F6F6]"
             }`}
             onClick={() => {
-              setActiveTab('switch');
-              setError('');
-              setSuccess('');
+              setActiveTab("switch");
+              setError("");
+              setSuccess("");
             }}
           >
             My Crews ({groups.length})
@@ -122,14 +139,14 @@ export default function GroupModal({
           <button
             type="button"
             className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'create'
-                ? 'bg-[#a66bff] text-white shadow-sm'
-                : 'text-[#94A3B8] hover:text-[#F3F6F6]'
+              activeTab === "create"
+                ? "bg-[#a66bff] text-white shadow-sm"
+                : "text-[#94A3B8] hover:text-[#F3F6F6]"
             }`}
             onClick={() => {
-              setActiveTab('create');
-              setError('');
-              setSuccess('');
+              setActiveTab("create");
+              setError("");
+              setSuccess("");
             }}
           >
             + New Crew
@@ -138,14 +155,14 @@ export default function GroupModal({
           <button
             type="button"
             className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'join'
-                ? 'bg-[#a66bff] text-white shadow-sm'
-                : 'text-[#94A3B8] hover:text-[#F3F6F6]'
+              activeTab === "join"
+                ? "bg-[#a66bff] text-white shadow-sm"
+                : "text-[#94A3B8] hover:text-[#F3F6F6]"
             }`}
             onClick={() => {
-              setActiveTab('join');
-              setError('');
-              setSuccess('');
+              setActiveTab("join");
+              setError("");
+              setSuccess("");
             }}
           >
             Join Crew
@@ -165,7 +182,7 @@ export default function GroupModal({
         )}
 
         {/* Tab 1: Switch between existing groups */}
-        {activeTab === 'switch' && (
+        {activeTab === "switch" && (
           <div className="space-y-2">
             {groups.length === 0 ? (
               <p className="text-xs text-[#7E8B99] py-4 text-center">
@@ -173,7 +190,9 @@ export default function GroupModal({
               </p>
             ) : (
               groups.map((grp) => {
-                const isSelected = activeGroup && (activeGroup._id === grp._id || activeGroup.id === grp._id);
+                const isSelected =
+                  activeGroup &&
+                  (activeGroup._id === grp._id || activeGroup.id === grp._id);
                 return (
                   <div
                     key={grp._id || grp.id}
@@ -183,8 +202,8 @@ export default function GroupModal({
                     }}
                     className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
-                        ? 'bg-[#a66bff]/15 border-[#a66bff]/60 shadow-[0_0_15px_rgba(166,107,255,0.2)]'
-                        : 'bg-[#171426] border-white/5 hover:border-white/20'
+                        ? "bg-[#a66bff]/15 border-[#a66bff]/60 shadow-[0_0_15px_rgba(166,107,255,0.2)]"
+                        : "bg-[#171426] border-white/5 hover:border-white/20"
                     }`}
                   >
                     <div>
@@ -192,7 +211,8 @@ export default function GroupModal({
                         {grp.name}
                       </div>
                       <div className="text-[11px] text-[#7E8B99]">
-                        {grp.members?.length || 1} member(s) • Target: ${grp.targetAmount || 200}
+                        {grp.members?.length || 1} member(s) • Target: $
+                        {grp.targetAmount || 200}
                       </div>
                       {grp.inviteCode && (
                         <div className="text-[10px] text-[#a66bff] font-mono mt-0.5">
@@ -201,7 +221,9 @@ export default function GroupModal({
                       )}
                     </div>
                     {isSelected && (
-                      <span className="text-xs font-bold text-[#a66bff]">Active</span>
+                      <span className="text-xs font-bold text-[#a66bff]">
+                        Active
+                      </span>
                     )}
                   </div>
                 );
@@ -211,7 +233,7 @@ export default function GroupModal({
         )}
 
         {/* Tab 2: Create a new group */}
-        {activeTab === 'create' && (
+        {activeTab === "create" && (
           <form onSubmit={handleCreate} className="space-y-3">
             <div className="form-group">
               <label htmlFor="group-name">Crew / Group Name *</label>
@@ -269,14 +291,14 @@ export default function GroupModal({
                 className="add-expense-button"
                 disabled={submitting}
               >
-                {submitting ? 'Creating...' : 'Create Crew'}
+                {submitting ? "Creating..." : "Create Crew"}
               </button>
             </div>
           </form>
         )}
 
         {/* Tab 3: Join group via Invite Code */}
-        {activeTab === 'join' && (
+        {activeTab === "join" && (
           <form onSubmit={handleJoin} className="space-y-4">
             <div className="form-group">
               <label htmlFor="invite-code">8-Character Invite Code *</label>
@@ -308,7 +330,7 @@ export default function GroupModal({
                 className="add-expense-button"
                 disabled={submitting}
               >
-                {submitting ? 'Joining...' : 'Join Crew'}
+                {submitting ? "Joining..." : "Join Crew"}
               </button>
             </div>
           </form>

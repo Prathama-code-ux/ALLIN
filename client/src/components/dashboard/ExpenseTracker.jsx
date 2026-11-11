@@ -1,39 +1,40 @@
-import React, { useState } from 'react';
-import StatCard from './StatCard';
-import { Plus, Edit2, Trash2, Search, X } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import StatCard from "./StatCard";
+import { Plus, Edit2, Trash2, Search, X } from "lucide-react";
+import { parsePaymentQR } from "../../utils/parsePaymentQR";
 
 const expenseCategories = [
-  'Food',
-  'Transport',
-  'Shopping',
-  'Entertainment',
-  'Bills',
-  'Health',
-  'Travel',
-  'Other',
+  "Food",
+  "Transport",
+  "Shopping",
+  "Entertainment",
+  "Bills",
+  "Health",
+  "Travel",
+  "Other",
 ];
 
 const categoryIcons = {
-  Food: '🍔',
-  Transport: '🚕',
-  Shopping: '🛍',
-  Entertainment: '🎬',
-  Bills: '📄',
-  Health: '💊',
-  Travel: '✈️',
-  Other: '📦',
+  Food: "🍔",
+  Transport: "🚕",
+  Shopping: "🛍",
+  Entertainment: "🎬",
+  Bills: "📄",
+  Health: "💊",
+  Travel: "✈️",
+  Other: "📦",
 };
 
 const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
 
 const formatDate = (date) => {
-  if (!date) return '—';
+  if (!date) return "—";
   try {
-    const d = new Date(date.includes('T') ? date : `${date}T00:00:00`);
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: '2-digit',
-      year: 'numeric',
+    const d = new Date(date.includes("T") ? date : `${date}T00:00:00`);
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
     });
   } catch {
     return date;
@@ -41,30 +42,65 @@ const formatDate = (date) => {
 };
 
 const emptyForm = {
-  title: '',
-  category: 'Food',
-  amount: '',
-  date: new Date().toISOString().split('T')[0],
-  description: '',
+  title: "",
+  category: "Food",
+  amount: "",
+  date: new Date().toISOString().split("T")[0],
+  description: "",
+  groupId: "",
 };
 
 export default function ExpenseTracker({
   expenses = [],
+  groups = [],
+  activeGroup,
   onAddExpense,
   onUpdateExpense,
   onDeleteExpense,
   loading = false,
+  onOpenQRScanner,
+  scannedQRData = "",
+  onQRDataHandled,
 }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [search, setSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
   const [formData, setFormData] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
 
+  const [qrDetails, setQrDetails] = useState("");
+
+  useEffect(() => {
+    if (!scannedQRData) return;
+
+    const parsed = parsePaymentQR(scannedQRData);
+
+    setQrDetails(scannedQRData);
+
+    setFormData((prev) => ({
+      ...prev,
+      title: parsed.merchantName
+        ? `Payment to ${parsed.merchantName}`
+        : prev.title,
+      amount: parsed.amount || "",
+      description: [
+        parsed.upiId ? `UPI ID: ${parsed.upiId}` : "",
+        parsed.note ? `Note: ${parsed.note}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    }));
+
+    setEditingId(null);
+    setShowForm(true);
+
+    onQRDataHandled?.();
+  }, [scannedQRData, onQRDataHandled]);
+
   const totalExpenses = expenses.reduce(
     (total, exp) => total + Number(exp.amount || 0),
-    0
+    0,
   );
 
   const categoryTotals = expenseCategories
@@ -85,18 +121,21 @@ export default function ExpenseTracker({
         (expense.description && expense.description.toLowerCase().includes(q));
 
       const matchesCategory =
-        selectedCategory === 'All' || expense.category === selectedCategory;
+        selectedCategory === "All" || expense.category === selectedCategory;
 
       return matchesSearch && matchesCategory;
     })
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
 
   const openAddForm = () => {
     setEditingId(null);
+
     setFormData({
       ...emptyForm,
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toISOString().split("T")[0],
+      groupId: activeGroup?._id || activeGroup?.id || "",
     });
+
     setShowForm(true);
   };
 
@@ -106,8 +145,10 @@ export default function ExpenseTracker({
       title: expense.title,
       category: expense.category,
       amount: String(expense.amount),
-      date: expense.date ? expense.date.split('T')[0] : new Date().toISOString().split('T')[0],
-      description: expense.description || '',
+      date: expense.date
+        ? expense.date.split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      description: expense.description || "",
     });
     setShowForm(true);
   };
@@ -119,19 +160,21 @@ export default function ExpenseTracker({
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
+
     const amount = Number(formData.amount);
 
     if (!formData.title.trim()) {
-      alert('Please enter an expense title.');
+      alert("Please enter an expense title.");
       return;
     }
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      alert('Please enter a valid expense amount.');
+      alert("Please enter a valid expense amount.");
       return;
     }
 
     setSubmitting(true);
+
     try {
       const payload = {
         title: formData.title.trim(),
@@ -144,14 +187,18 @@ export default function ExpenseTracker({
       if (editingId !== null) {
         await onUpdateExpense(editingId, payload);
       } else {
-        await onAddExpense(payload);
+        await onAddExpense({
+          ...payload,
+          groupId: formData.groupId || null,
+        });
       }
 
       setShowForm(false);
       setEditingId(null);
       setFormData(emptyForm);
+      setQrDetails("");
     } catch (err) {
-      alert(err.message || 'Failed to save expense');
+      alert(err.message || "Failed to save expense");
     } finally {
       setSubmitting(false);
     }
@@ -159,21 +206,18 @@ export default function ExpenseTracker({
 
   const handleDelete = async (id, title) => {
     const confirmed = window.confirm(
-      `Are you sure you want to delete the expense "${title}"?`
+      `Are you sure you want to delete the expense "${title}"?`,
     );
     if (!confirmed) return;
 
     try {
       await onDeleteExpense(id);
     } catch (err) {
-      alert(err.message || 'Failed to delete expense');
+      alert(err.message || "Failed to delete expense");
     }
   };
 
-  const maxCategoryAmount = Math.max(
-    ...categoryTotals.map((c) => c.amount),
-    1
-  );
+  const maxCategoryAmount = Math.max(...categoryTotals.map((c) => c.amount), 1);
 
   return (
     <section className="expense-page">
@@ -181,7 +225,10 @@ export default function ExpenseTracker({
         <div>
           <span className="eyebrow">MONEY MANAGEMENT</span>
           <h1>Expense Tracker</h1>
-          <p>Persist, categorize, and track shared crew expenses in MongoDB Atlas.</p>
+          <p>
+            Persist, categorize, and track shared crew expenses in MongoDB
+            Atlas.
+          </p>
         </div>
 
         <button
@@ -207,7 +254,7 @@ export default function ExpenseTracker({
         <StatCard
           label="AVERAGE EXPENSE"
           amount={formatMoney(
-            expenses.length ? totalExpenses / expenses.length : 0
+            expenses.length ? totalExpenses / expenses.length : 0,
           )}
           description="Average per recorded expense"
           icon="◈"
@@ -233,7 +280,8 @@ export default function ExpenseTracker({
 
         {categoryTotals.length === 0 ? (
           <p className="empty-expenses">
-            No expenses recorded yet. Click &quot;Add Expense&quot; to log your first payment!
+            No expenses recorded yet. Click &quot;Add Expense&quot; to log your
+            first payment!
           </p>
         ) : (
           <div className="categories-list">
@@ -243,7 +291,9 @@ export default function ExpenseTracker({
                   <span className="category-title">
                     {categoryIcons[cat.name]} {cat.name}
                   </span>
-                  <span className="category-amount">{formatMoney(cat.amount)}</span>
+                  <span className="category-amount">
+                    {formatMoney(cat.amount)}
+                  </span>
                 </div>
 
                 <div className="category-bar">
@@ -262,13 +312,26 @@ export default function ExpenseTracker({
 
       {/* Modal Form for Add/Edit Expense */}
       {showForm && (
-        <div className="expense-modal-backdrop" onClick={() => setShowForm(false)}>
+        <div
+          className="expense-modal-backdrop"
+          onClick={() => setShowForm(false)}
+        >
           <div
             className="expense-modal-card"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="expense-modal-header">
-              <h3>{editingId !== null ? 'Edit Expense' : 'Add New Expense'}</h3>
+              <div>
+                <h3>
+                  {editingId !== null ? "Edit Expense" : "Add New Expense"}
+                </h3>
+                {editingId === null && (
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Create an expense manually or scan a merchant QR.
+                  </p>
+                )}
+              </div>
+
               <button
                 type="button"
                 className="close-modal-button"
@@ -278,6 +341,47 @@ export default function ExpenseTracker({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {editingId === null && (
+              <div className="mb-4">
+                <button
+                  type="button"
+                  onClick={onOpenQRScanner}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-[#a66bff]/30 bg-[#a66bff]/10 text-[#c49cff] text-sm font-semibold hover:bg-[#a66bff]/20 transition"
+                >
+                  <span>▦</span>
+                  Scan Bill / Merchant QR
+                </button>
+              </div>
+            )}
+
+            {qrDetails && (
+              <div className="mb-4 p-4 rounded-xl bg-[#a66bff]/10 border border-[#a66bff]/25">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-bold text-[#c49cff]">
+                    QR INFORMATION DETECTED
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setQrDetails("")}
+                    className="text-xs text-[#94A3B8] hover:text-white"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <p className="text-xs text-[#F3F6F6] break-all whitespace-pre-wrap">
+                  {qrDetails}
+                </p>
+
+                <p className="text-[11px] text-[#94A3B8] mt-2">
+                  Merchant information and available amount have been extracted.
+                  Please verify the details before saving. Scanning does not
+                  initiate a payment.
+                </p>
+              </div>
+            )}
 
             <form onSubmit={handleFormSubmit} className="expense-form">
               <div className="form-group">
@@ -292,6 +396,38 @@ export default function ExpenseTracker({
                   onChange={handleFormChange}
                 />
               </div>
+              {editingId === null && (
+                <div className="form-group">
+                  <label htmlFor="expense-group">Add Expense To *</label>
+
+                  <select
+                    id="expense-group"
+                    name="groupId"
+                    value={formData.groupId}
+                    onChange={handleFormChange}
+                  >
+                    <option value="">Personal Expense</option>
+
+                    {groups
+                      .filter(
+                        (group) =>
+                          group.status !== "closed" && !group.deletedAt,
+                      )
+                      .map((group) => (
+                        <option
+                          key={group._id || group.id}
+                          value={group._id || group.id}
+                        >
+                          {group.name}
+                        </option>
+                      ))}
+                  </select>
+
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Choose an existing crew or save this as a personal expense.
+                  </p>
+                </div>
+              )}
 
               <div className="form-row">
                 <div className="form-group">
@@ -366,10 +502,10 @@ export default function ExpenseTracker({
                   disabled={submitting}
                 >
                   {submitting
-                    ? 'Saving to DB...'
+                    ? "Saving to DB..."
                     : editingId !== null
-                    ? 'Save Changes'
-                    : 'Save Expense'}
+                      ? "Save Changes"
+                      : "Save Expense"}
                 </button>
               </div>
             </form>
@@ -445,7 +581,9 @@ export default function ExpenseTracker({
                     <td>
                       <div className="expense-title-cell">
                         <strong>{exp.title}</strong>
-                        <span>{exp.description || 'No description provided'}</span>
+                        <span>
+                          {exp.description || "No description provided"}
+                        </span>
                       </div>
                     </td>
 

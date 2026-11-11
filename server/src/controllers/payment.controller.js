@@ -2,6 +2,7 @@ import paypalService, { createOrder, captureOrder, verifyWebhookSignature } from
 import Payment from "../models/payment.js";
 import Expense from "../models/expense.js";
 import Group from "../models/Group.js";
+import WebhookEvent from "../models/webhookEvent.js";
 import mongoose from "mongoose";
 
 // Create payment order with strict server-side derived split amount
@@ -36,20 +37,38 @@ export const createPaymentOrder = async (req, res) => {
 
             finalExpenseId = expense._id;
             finalGroupId = expense.group?._id || expense.group || finalGroupId;
-
-            // Group membership authorization
             if (expense.group) {
-                const group = await Group.findById(expense.group);
-                if (group) {
-                    const isMember = group.members.some(m => m.equals(userId));
-                    if (!isMember) {
-                        return res.status(403).json({
-                            success: false,
-                            message: "You are not an authorized member of this group"
-                        });
-                    }
-                }
-            }
+    const group = await Group.findOne({
+        _id: expense.group._id || expense.group,
+        deletedAt: null
+    });
+
+    if (!group) {
+        return res.status(404).json({
+            success: false,
+            message: "Group not found"
+        });
+    }
+
+    if (group.status !== "active") {
+        return res.status(400).json({
+            success: false,
+            message: "Cannot initiate payments for a closed group"
+        });
+    }
+
+    const isMember = group.members.some(
+        member => member.equals(userId)
+    );
+
+    if (!isMember) {
+        return res.status(403).json({
+            success: false,
+            message: "You are not an authorized member of this group"
+        });
+    }
+}
+          
 
             // Find user's split in the expense
             const userSplit = expense.splits?.find(s => s.user.equals(userId));
@@ -104,13 +123,24 @@ export const createPaymentOrder = async (req, res) => {
                     });
                 }
 
-                const group = await Group.findById(finalGroupId);
-                if (!group) {
-                    return res.status(404).json({
-                        success: false,
-                        message: "Group not found"
-                    });
-                }
+                const group = await Group.findOne({
+    _id: finalGroupId,
+    deletedAt: null
+});
+
+if (!group) {
+    return res.status(404).json({
+        success: false,
+        message: "Group not found"
+    });
+}
+
+if (group.status !== "active") {
+    return res.status(400).json({
+        success: false,
+        message: "Cannot contribute to a closed group"
+    });
+}
 
                 const isMember = group.members.some(m => m.equals(userId));
                 if (!isMember) {
@@ -308,11 +338,20 @@ export const capturePaymentOrder = async (req, res) => {
 };
 
 // PayPal Webhook listener for asynchronous events
+
 export const handlePayPalWebhook = async (req, res) => {
+    let eventRecord = null;
+
     try {
-        const verification = await (paypalService.verifyWebhookSignature || verifyWebhookSignature)(req.headers, req.body);
+        // 1. Verify webhook signature
+        const verification = await (
+            paypalService.verifyWebhookSignature ||
+            verifyWebhookSignature
+        )(req.headers, req.body);
 
         if (verification.verification_status !== "SUCCESS") {
+            console.error("Invalid PayPal webhook signature");
+
             return res.status(400).json({
                 success: false,
                 message: "Webhook signature verification failed"
@@ -320,37 +359,215 @@ export const handlePayPalWebhook = async (req, res) => {
         }
 
         const event = req.body;
+
+        if (!event.id || !event.event_type) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid PayPal webhook event"
+            });
+        }
+
+        // 2. Register event to prevent duplicate processing
+        try {
+            eventRecord = await WebhookEvent.create({
+                eventId: event.id,
+                eventType: event.event_type,
+                status: "processing"
+            });
+        } catch (error) {
+            // Duplicate event: it has already been received
+            if (error.code === 11000) {
+                return res.status(200).json({
+                    received: true,
+                    duplicate: true
+                });
+            }
+
+            throw error;
+        }
+
         const eventType = event.event_type;
+        const resource = event.resource;
 
+        // 3. Handle completed capture
         if (eventType === "PAYMENT.CAPTURE.COMPLETED") {
-            const capture = event.resource;
-            const captureId = capture.id;
-            const customId = capture.custom_id;
 
+            const captureId = resource.id;
+            const orderId =
+                resource.supplementary_data?.related_ids?.order_id;
+
+            // Locate payment using order ID or capture ID
             const payment = await Payment.findOne({
-                $or: [{ paypalCaptureId: captureId }, { paypalOrderId: capture.id }]
+                $or: [
+                    ...(orderId ? [{ paypalOrderId: orderId }] : []),
+                    { paypalCaptureId: captureId }
+                ]
             });
 
-            if (payment && payment.status !== "captured") {
-                payment.status = "captured";
-                payment.paypalCaptureId = captureId;
-                payment.paidAt = new Date();
-                await payment.save();
+            if (!payment) {
+                throw new Error(
+                    `Payment not found for PayPal capture: ${captureId}`
+                );
+            }
 
-                if (payment.expense && payment.user) {
-                    await Expense.updateOne(
-                        { _id: payment.expense, "splits.user": payment.user },
-                        { $set: { "splits.$.status": "paid", "splits.$.paidAt": new Date() } }
+            const capturedAmount = Number(
+                resource.amount?.value
+            );
+
+            const capturedCurrency =
+                resource.amount?.currency_code;
+
+            // 4. Verify amount and currency
+            if (
+                !Number.isFinite(capturedAmount) ||
+                Math.abs(capturedAmount - payment.amount) > 0.01
+            ) {
+                throw new Error("Webhook capture amount mismatch");
+            }
+
+            if (capturedCurrency !== payment.currency) {
+                throw new Error("Webhook capture currency mismatch");
+            }
+
+            // 5. Update payment atomically
+            const updatedPayment = await Payment.findOneAndUpdate(
+                {
+                    _id: payment._id,
+                    status: { $nin: ["captured", "refunded"] }
+                },
+                {
+                    $set: {
+                        status: "captured",
+                        paypalCaptureId: captureId,
+                        paidAt: payment.paidAt || new Date()
+                    }
+                },
+                { new: true }
+            );
+
+            // Update expense split only if payment was newly captured
+            if (updatedPayment && payment.expense && payment.user) {
+                await Expense.updateOne(
+                    {
+                        _id: payment.expense,
+                        splits: {
+                            $elemMatch: {
+                                user: payment.user,
+                                status: { $ne: "paid" }
+                            }
+                        }
+                    },
+                    {
+                        $set: {
+                            "splits.$.status": "paid",
+                            "splits.$.paidAt": new Date()
+                        }
+                    }
+                );
+            }
+        }
+
+        // 6. Handle pending capture
+        else if (eventType === "PAYMENT.CAPTURE.PENDING") {
+            const captureId = resource.id;
+            const orderId =
+                resource.supplementary_data?.related_ids?.order_id;
+
+            const payment = await Payment.findOne({
+                $or: [
+                    ...(orderId ? [{ paypalOrderId: orderId }] : []),
+                    { paypalCaptureId: captureId }
+                ]
+            });
+
+            if (payment && payment.status === "pending") {
+                payment.status = "pending";
+                await payment.save();
+            }
+        }
+
+        // 7. Handle denied capture
+        else if (eventType === "PAYMENT.CAPTURE.DENIED") {
+            const captureId = resource.id;
+            const orderId =
+                resource.supplementary_data?.related_ids?.order_id;
+
+            const payment = await Payment.findOne({
+                $or: [
+                    ...(orderId ? [{ paypalOrderId: orderId }] : []),
+                    { paypalCaptureId: captureId }
+                ]
+            });
+
+            if (payment && payment.status === "pending") {
+                payment.status = "failed";
+                await payment.save();
+            }
+        }
+
+        // 8. Handle refunds
+        else if (eventType === "PAYMENT.CAPTURE.REFUNDED") {
+            const captureId =
+                resource.supplementary_data?.related_ids?.capture_id;
+
+            const refundAmount = Number(resource.amount?.value);
+
+            const payment = captureId
+                ? await Payment.findOne({
+                    paypalCaptureId: captureId
+                })
+                : null;
+
+            if (payment) {
+                // Only mark fully refunded payments as refunded.
+                // Partial refunds need separate accounting.
+                if (
+                    Number.isFinite(refundAmount) &&
+                    Math.abs(refundAmount - payment.amount) <= 0.01 &&
+                    resource.amount?.currency_code === payment.currency
+                ) {
+                    payment.status = "refunded";
+                    await payment.save();
+                } else {
+                    console.log(
+                        `Partial refund received for payment ${payment._id}`
                     );
                 }
             }
         }
 
-        return res.status(200).json({ received: true });
+        // 9. Mark webhook event as processed
+        await WebhookEvent.updateOne(
+            { _id: eventRecord._id },
+            {
+                $set: {
+                    status: "processed",
+                    processedAt: new Date()
+                }
+            }
+        );
+
+        return res.status(200).json({
+            received: true,
+            eventType
+        });
 
     } catch (error) {
-        console.error("PayPal webhook error:", error);
-        return res.status(500).json({ success: false, message: "Webhook processing error" });
+        console.error("PayPal webhook processing error:", error);
+
+        // Remove failed event record so PayPal can retry it.
+        if (eventRecord) {
+            await WebhookEvent.deleteOne({
+                _id: eventRecord._id
+            }).catch(err => {
+                console.error("Webhook cleanup error:", err);
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: "Webhook processing error"
+        });
     }
 };
 
