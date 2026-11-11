@@ -1,11 +1,31 @@
 import express from "express";
-import { createPaymentOrder, capturePaymentOrder } from "../controllers/payment.controller.js";
+import {
+    createPaymentOrder,
+    capturePaymentOrder,
+    getTransactions,
+    handlePayPalWebhook
+} from "../controllers/payment.controller.js";
+import { protect } from "../middleware/authMiddleware.js";
+
 const router = express.Router();
 
-//create paypal order
-router.post("/create-order", createPaymentOrder);
+// Optional auth helper for read-only history
+const optionalAuth = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        return protect(req, res, next);
+    }
+    next();
+};
 
-//capture paypal order
-router.post("/:orderId/capture", capturePaymentOrder);
+// Mandatory authentication on payment transactions
+router.post("/create-order", protect, createPaymentOrder);
+router.post("/:orderId/capture", protect, capturePaymentOrder);
+
+// Public webhook endpoint (signature verified cryptographically)
+router.post("/webhook", handlePayPalWebhook);
+
+// Transaction history
+router.get("/transactions", optionalAuth, getTransactions);
 
 export default router;

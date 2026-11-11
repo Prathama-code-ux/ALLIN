@@ -1,3 +1,4 @@
+/* App-specific custom rules (if any) */
 /* APP LAYOUT */
 
 .app-layout {
@@ -696,19 +697,44 @@
     font-size: 26px;
   }
 
+  
+/* STATISTICS GRID */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.stat-card {
+  min-width: 0;
+  padding: 22px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.stat-card:hover {
+  border-color: var(--border-violet);
+  transform: translateY(-2px);
+}
+
+@media (max-width: 1100px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
   .stats-grid {
     grid-template-columns: 1fr;
-    gap: 11px;
+    gap: 12px;
   }
+}
 
-  .stat-card {
-    padding: 17px;
-  }
-
-  .stat-card h2 {
-    margin-top: 12px;
-    font-size: 26px;
-  }
 
   .collection-card,
   .panel {
@@ -1451,4 +1477,434 @@
   .expense-table {
     min-width: 620px;
   }
+}
+
+/* INTEGRATED DASHBOARD ENHANCEMENTS */
+
+.sidebar-group-chip {
+  background: rgba(23, 20, 38, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-bottom: 20px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #a66bff, #6125c8);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: white;
+  box-shadow: 0 0 12px rgba(166, 107, 255, 0.3);
+}
+
+.user-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-info strong {
+  font-size: 13px;
+  color: #F3F6F6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-info small {
+  font-size: 11px;
+  color: #7E8B99;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sign-out-btn {
+  background: transparent;
+  border: none;
+  color: #7E8B99;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: all 0.2s;
+  display: grid;
+  place-items: center;
+}
+
+.sign-out-btn:hover {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.action-icon-btn {
+  background: rgba(23, 20, 38, 0.6);
+  border: 1px solid var(--border);
+  color: #94A3B8;
+  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-icon-btn:hover {
+  color: #a66bff;
+  border-color: rgba(166, 107, 255, 0.4);
+}
+
+.group-action-btn {
+  background: rgba(166, 107, 255, 0.12);
+  border: 1px solid rgba(166, 107, 255, 0.3);
+  color: #a66bff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.group-action-btn:hover {
+  background: rgba(166, 107, 255, 0.2);
+  border-color: rgba(166, 107, 255, 0.5);
+  color: #c49cff;
+}
+
+.quick-pay-btn {
+  background: #a66bff;
+  color: white;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-pay-btn:hover {
+  background: #b580ff;
+  box-shadow: 0 0 10px rgba(166, 107, 255, 0.4);
+}
+
+.you-tag {
+  background: rgba(166, 107, 255, 0.15);
+  border: 1px solid rgba(166, 107, 255, 0.3);
+  color: #a66bff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.paypal-tag {
+  background: rgba(255, 255, 255, 0.15);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dismiss-feedback-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  margin-left: auto;
+}
+
+.dismiss-feedback-btn:hover {
+  opacity: 1;
+}
+
+.empty-state-card {
+  text-align: center;
+  padding: 40px 20px;
+  color: #7E8B99;
+}
+
+.empty-state-card span {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 12px;
+  opacity: 0.8;
+}
+
+.empty-state-card h3 {
+  font-size: 16px;
+  color: #F3F6F6;
+  margin: 0 0 6px;
+}
+
+.empty-state-card p {
+  font-size: 13px;
+  margin: 0;
+  max-width: 320px;
+  margin: 0 auto;
+}
+
+
+/* TRANSACTION COMPONENT */
+
+.txn-filter-bar {
+  margin-bottom: 20px;
+}
+
+.txn-search-input {
+  width: 100%;
+  padding: 12px 15px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  outline: none;
+}
+
+.txn-search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
+.transactions-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.txn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 17px 4px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s ease;
+}
+
+.txn-row:last-child {
+  border-bottom: none;
+}
+
+.txn-left,
+.txn-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.txn-right {
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.txn-avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--accent-muted);
+  border: 1px solid var(--border-violet);
+  color: var(--primary-light);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.txn-info {
+  min-width: 0;
+}
+
+.txn-id,
+.txn-date {
+  color: var(--text-muted);
+}
+
+.txn-amount {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.status-completed {
+  color: var(--success);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-pending {
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.status-failed {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+@media (max-width: 480px) {
+  .txn-row {
+    gap: 8px;
+  }
+
+  .txn-left {
+    gap: 8px;
+  }
+
+  .txn-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .txn-id {
+    display: none;
+  }
+
+  .txn-amount {
+    font-size: 12px;
+  }
+}
+
+.expense-search-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(14, 12, 20, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 14px;
+  flex: 1;
+}
+
+.expense-search-wrapper input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 10px 0 !important;
+  outline: none !important;
+  width: 100%;
+}
+
+/* Dashboard custom fixes */
+.pool-progress-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.pool-progress-amounts strong {
+  font-weight: 600;
+}
+
+.pool-progress-amounts span {
+  margin: 0 2px;
+}
+
+.pool-percentage-badge {
+  background: rgba(139, 67, 246, 0.2);
+  color: var(--neon);
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Progress bar container – alias for existing progress-track */
+.progress-bar-container {
+  width: 100%;
+  background: #34283e;
+  border-radius: 20px;
+  overflow: hidden;
+  margin: 12px 0;
+}
+
+/* Ensure inner fill uses existing .progress-fill */
+.progress-bar-container .progress-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7133d9, #bd83ff);
+  box-shadow: 0 0 15px rgba(166, 107, 255, 0.5);
+}
+
+/* Stat card header fix – match .stat-top layout */
+.stat-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+/* Stat card footer spacing */
+.stat-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+/* Stats grid – responsive 4‑column layout */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 17px;
+  margin-bottom: 18px;
+}
+
+/* Alias for progress footer used in PaymentOverview */
+.pool-progress-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 8px;
 }
