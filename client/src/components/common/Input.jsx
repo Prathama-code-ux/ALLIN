@@ -31,13 +31,13 @@ export default function Input({
           htmlFor={inputId}
           className="block text-xs font-medium uppercase tracking-wider text-[#94A3B8] mb-1.5"
         >
-          {label} {required && <span className="text-[#00E5D4]">*</span>}
+          {label} {required && <span className="text-[#a66bff]">*</span>}
         </label>
       )}
 
       <div className="relative flex items-center">
         {Icon && (
-          <div className="absolute left-3.5 flex items-center pointer-events-none text-[#64748B] group-focus-within:text-[#00E5D4]">
+          <div className="absolute left-3.5 flex items-center pointer-events-none text-[#7E8B99] group-focus-within:text-[#a66bff]">
             <Icon className="w-4 h-4" />
           </div>
         )}
@@ -53,14 +53,14 @@ export default function Input({
           placeholder={placeholder}
           autoComplete={autoComplete}
           required={required}
-          className={`w-full rounded-xl bg-[#111719] text-[#F3F6F6] text-sm placeholder-[#4B5563] border transition-all duration-200 outline-none
+          className={`w-full rounded-xl bg-[#171426] text-[#F3F6F6] text-sm placeholder-[#64748B] border transition-all duration-200 outline-none
             ${Icon ? 'pl-10' : 'pl-4'}
             ${isPassword ? 'pr-11' : 'pr-4'}
             py-3
             ${
               error
                 ? 'border-rose-500/70 focus:border-rose-400 focus:ring-2 focus:ring-rose-500/20'
-                : 'border-white/10 hover:border-white/20 focus:border-[#00E5D4] focus:ring-2 focus:ring-[#00E5D4]/20'
+                : 'border-white/10 hover:border-white/20 focus:border-[#a66bff] focus:ring-2 focus:ring-[#a66bff]/20'
             }
             ${disabled ? 'opacity-50 cursor-not-allowed bg-black/40' : ''}
           `}
@@ -72,7 +72,7 @@ export default function Input({
             type="button"
             onClick={() => setShowPassword(!showPassword)}
             tabIndex={-1}
-            className="absolute right-3.5 p-1 text-[#64748B] hover:text-[#00E5D4] transition-colors focus:outline-none"
+            className="absolute right-3.5 p-1 text-[#7E8B99] hover:text-[#a66bff] transition-colors focus:outline-none"
             aria-label={showPassword ? 'Hide password' : 'Show password'}
           >
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -86,9 +86,8 @@ export default function Input({
           {error}
         </p>
       ) : helperText ? (
-        <p className="mt-1.5 text-xs text-[#64748B]">{helperText}</p>
+        <p className="mt-1.5 text-xs text-[#7E8B99]">{helperText}</p>
       ) : null}
     </div>
   );
 }
-

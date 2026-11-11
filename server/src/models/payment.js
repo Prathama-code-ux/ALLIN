@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const paymentSchema = new mongoose.Schema(
@@ -6,19 +5,19 @@ const paymentSchema = new mongoose.Schema(
     expense: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Expense",
-      required: true
+      default: null
     },
 
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
-      required: true
+      default: null
     },
 
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      default: null
     },
 
     amount: {
@@ -27,23 +26,29 @@ const paymentSchema = new mongoose.Schema(
       min: 0
     },
 
+    currency: {
+      type: String,
+      default: "USD"
+    },
+
     status: {
-        type: String,
-        enum: [
-            "pending",
-            "approved",
-            "authorized",
-            "captured",
-            "failed",
-            "voided",
-            "refunded"
-        ],
-        default: "pending"
+      type: String,
+      enum: [
+        "pending",
+        "approved",
+        "authorized",
+        "captured",
+        "failed",
+        "voided",
+        "refunded"
+      ],
+      default: "pending"
     },
 
     paypalOrderId: {
       type: String,
-      default: null
+      default: null,
+      index: true
     },
 
     paypalCaptureId: {
@@ -51,20 +56,34 @@ const paymentSchema = new mongoose.Schema(
       default: null
     },
 
-    paidAt: {
-      type: Date,
+    paypalAuthorizationId: {
+      type: String,
       default: null
     },
 
-    paypalAuthorizationId: {
-        type: String,
-        default: null
+    payerName: {
+      type: String,
+      default: null
     },
 
+    payerEmail: {
+      type: String,
+      default: null
+    },
+
+    description: {
+      type: String,
+      default: ""
+    },
+
+    paidAt: {
+      type: Date,
+      default: null
+    }
   },
   { timestamps: true }
 );
 
-const Payment = mongoose.model("Payment", paymentSchema);
+const Payment = mongoose.models.Payment || mongoose.model("Payment", paymentSchema);
 
 export default Payment;

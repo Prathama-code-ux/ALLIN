@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const groupSchema = new mongoose.Schema(
@@ -7,6 +6,18 @@ const groupSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true
+    },
+
+    description: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    targetAmount: {
+      type: Number,
+      default: 200,
+      min: 0
     },
 
     createdBy: {
@@ -33,6 +44,6 @@ const groupSchema = new mongoose.Schema(
   }
 );
 
-const Group = mongoose.model("Group", groupSchema);
+const Group = mongoose.models.Group || mongoose.model("Group", groupSchema);
 
 export default Group;

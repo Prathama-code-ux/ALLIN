@@ -3,10 +3,18 @@ import app from "../src/app.js";
 
 describe("ALLIN API Tests", () => {
 
-    // Health endpoint
-    describe("GET /health", () => {
-        it("should return healthy status", async () => {
+    // Health endpoints
+    describe("GET /health and /api/health", () => {
+        it("should return healthy status on /health", async () => {
             const response = await request(app).get("/health");
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.status).toBe("healthy");
+            expect(response.body.service).toBe("ALLIN");
+        });
+
+        it("should return healthy status on /api/health", async () => {
+            const response = await request(app).get("/api/health");
 
             expect(response.statusCode).toBe(200);
             expect(response.body.status).toBe("healthy");
@@ -38,6 +46,39 @@ describe("ALLIN API Tests", () => {
 
             expect(response.statusCode).toBe(200);
             expect(response.body.received).toEqual(data);
+        });
+    });
+
+    // Payment validation
+    describe("POST /api/payments/create-order validation", () => {
+        it("should reject order creation with invalid or missing amount", async () => {
+            const response = await request(app)
+                .post("/api/payments/create-order")
+                .send({ amount: -10 });
+
+            expect(response.statusCode).toBe(400);
+            expect(response.body.success).toBe(false);
+        });
+    });
+
+    // Expense validation
+    describe("POST /api/expenses validation", () => {
+        it("should reject expense creation without title", async () => {
+            const response = await request(app)
+                .post("/api/expenses")
+                .send({ amount: 50 });
+
+            expect(response.statusCode).toBe(400);
+            expect(response.body.success).toBe(false);
+        });
+
+        it("should reject expense creation with non-positive amount", async () => {
+            const response = await request(app)
+                .post("/api/expenses")
+                .send({ title: "Coffee", amount: 0 });
+
+            expect(response.statusCode).toBe(400);
+            expect(response.body.success).toBe(false);
         });
     });
 

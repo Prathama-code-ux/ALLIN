@@ -1,8 +1,14 @@
 import axios from 'axios';
 
+// Resolve unified API base URL
+const rawBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const baseURL = rawBase.endsWith('/api')
+  ? rawBase
+  : `${rawBase.replace(/\/+$/, '')}/api`;
+
 // Create base Axios instance
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -26,7 +32,6 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // Don't auto-redirect if we're already on login/register/welcome
       const publicPaths = ['/login', '/register', '/welcome', '/'];
       const currentPath = window.location.pathname;
 
@@ -41,4 +46,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-

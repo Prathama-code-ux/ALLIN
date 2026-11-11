@@ -1,0 +1,17 @@
+{
+  "name": "allin",
+  "version": "1.0.0",
+  "description": "ALLIN — Collaborative Payments & Shared Expense Management Platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "test": "npm --prefix server test",
+    "lint": "npm --prefix client run lint"
+  },
+  "dependencies": {
+    "mongoose": "^9.12.1"
+  }
+}
