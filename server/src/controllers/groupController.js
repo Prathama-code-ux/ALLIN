@@ -50,8 +50,9 @@ export const createGroup = async (req, res) => {
 export const getMyGroups = async (req, res) => {
     try {
         let groups = await Group.find({
-            members: req.user._id
-        })
+    members: req.user._id,
+    deletedAt: null
+})
         .populate("createdBy", "name email")
         .populate("members", "name email");
 
@@ -96,8 +97,10 @@ export const joinGroup = async (req, res) => {
         }
 
         const group = await Group.findOne({
-            inviteCode: inviteCode.trim().toUpperCase()
-        });
+    inviteCode: inviteCode.trim().toUpperCase(),
+    deletedAt: null,
+    status: "active"
+});
 
         if (!group) {
             return res.status(404).json({
@@ -141,7 +144,10 @@ export const getGroupById = async (req, res) => {
             });
         }
 
-        const group = await Group.findById(id)
+        const group = await Group.findOne({
+    _id: id,
+    deletedAt: null
+})
             .populate("createdBy", "name email")
             .populate("members", "name email");
 
@@ -184,7 +190,10 @@ export const getGroupContributions = async (req, res) => {
             });
         }
 
-        const group = await Group.findById(id)
+        const group = await Group.findOne({
+    _id: id,
+    deletedAt: null
+})
             .populate("createdBy", "name email")
             .populate("members", "name email");
 
@@ -302,6 +311,176 @@ export const getGroupContributions = async (req, res) => {
         console.error("Get group contributions error:", error);
         return res.status(500).json({
             message: "Failed to calculate contributions"
+        });
+    }
+};
+
+export const closeGroup = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid group ID"
+            });
+        }
+
+        const group = await Group.findOne({
+            _id: id,
+            deletedAt: null
+        });
+
+        if (!group) {
+            return res.status(404).json({
+                success: false,
+                message: "Group not found"
+            });
+        }
+
+        if (!group.createdBy.equals(req.user._id)) {
+            return res.status(403).json({
+                success: false,
+                message: "Only the group admin can close this group"
+            });
+        }
+
+        if (group.status === "closed") {
+            return res.status(400).json({
+                success: false,
+                message: "This group is already closed"
+            });
+        }
+
+        // Do not close while a payment is still in progress.
+        const inFlightPayment = await Payment.findOne({
+            group: group._id,
+            status: { $in: ["pending", "approved", "authorized"] }
+        });
+
+        if (inFlightPayment) {
+            return res.status(409).json({
+                success: false,
+                message: "Cannot close the group while payments are pending or processing"
+            });
+        }
+
+        // Count only verified paid expense splits.
+        const expenses = await Expense.find({
+            group: group._id,
+            deletedAt: null
+        });
+
+        const collectedAmount = expenses.reduce((total, expense) => {
+            const paidSplits = (expense.splits || [])
+                .filter(split => split.status === "paid");
+
+            return total + paidSplits.reduce(
+                (sum, split) => sum + Number(split.amount || 0),
+                0
+            );
+        }, 0);
+
+        const targetAmount = Number(group.targetAmount || 0);
+
+        if (collectedAmount + 0.01 < targetAmount) {
+            return res.status(400).json({
+                success: false,
+                message: "The group collection target has not been reached",
+                targetAmount,
+                collectedAmount: Number(collectedAmount.toFixed(2)),
+                remaining: Number(
+                    Math.max(0, targetAmount - collectedAmount).toFixed(2)
+                )
+            });
+        }
+
+        group.status = "closed";
+        group.closedAt = new Date();
+        group.closedBy = req.user._id;
+
+        await group.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Group closed successfully",
+            group: {
+                _id: group._id,
+                name: group.name,
+                status: group.status,
+                targetAmount,
+                collectedAmount: Number(collectedAmount.toFixed(2)),
+                closedAt: group.closedAt
+            }
+        });
+
+    } catch (error) {
+        console.error("Close group error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to close group"
+        });
+    }
+};
+
+
+export const deleteGroup = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid group ID"
+            });
+        }
+
+        const group = await Group.findOne({
+            _id: id,
+            deletedAt: null
+        });
+
+        if (!group) {
+            return res.status(404).json({
+                success: false,
+                message: "Group not found"
+            });
+        }
+
+        if (!group.createdBy.equals(req.user._id)) {
+            return res.status(403).json({
+                success: false,
+                message: "Only the group admin can delete this group"
+            });
+        }
+
+        const inFlightPayment = await Payment.findOne({
+            group: group._id,
+            status: { $in: ["pending", "approved", "authorized"] }
+        });
+
+        if (inFlightPayment) {
+            return res.status(409).json({
+                success: false,
+                message: "Cannot delete a group while payments are pending or processing"
+            });
+        }
+
+        group.deletedAt = new Date();
+        group.deletedBy = req.user._id;
+
+        await group.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Group deleted successfully"
+        });
+
+    } catch (error) {
+        console.error("Delete group error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete group"
         });
     }
 };

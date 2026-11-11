@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const groupSchema = new mongoose.Schema(
@@ -37,6 +38,34 @@ const groupSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true
+    },
+
+    status: {
+      type: String,
+      enum: ["active", "closed"],
+      default: "active"
+    },
+
+    closedAt: {
+      type: Date,
+      default: null
+    },
+
+    closedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null
+    },
+
+    deletedAt: {
+      type: Date,
+      default: null
+    },
+
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null
     }
   },
   {
@@ -44,6 +73,8 @@ const groupSchema = new mongoose.Schema(
   }
 );
 
-const Group = mongoose.models.Group || mongoose.model("Group", groupSchema);
+const Group =
+  mongoose.models.Group ||
+  mongoose.model("Group", groupSchema);
 
 export default Group;

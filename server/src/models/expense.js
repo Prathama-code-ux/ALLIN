@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const splitSchema = new mongoose.Schema(
@@ -5,26 +6,26 @@ const splitSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
     amount: {
       type: Number,
       required: true,
-      min: 0
+      min: 0,
     },
     status: {
       type: String,
       enum: ["pending", "approved", "paid"],
-      default: "pending"
+      default: "pending",
     },
     approvedAt: {
       type: Date,
-      default: null
+      default: null,
     },
     paidAt: {
       type: Date,
-      default: null
-    }
+      default: null,
+    },
   },
   { _id: false }
 );
@@ -34,7 +35,7 @@ const expenseSchema = new mongoose.Schema(
     title: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
 
     category: {
@@ -47,15 +48,15 @@ const expenseSchema = new mongoose.Schema(
         "Bills",
         "Health",
         "Travel",
-        "Other"
+        "Other",
       ],
-      default: "Other"
+      default: "Other",
     },
 
     amount: {
       type: Number,
       required: true,
-      min: 0
+      min: 0,
     },
 
     totalAmount: {
@@ -63,47 +64,65 @@ const expenseSchema = new mongoose.Schema(
       min: 0,
       default: function () {
         return this.amount;
-      }
+      },
+    },
+
+    // ALLIN expense tracking uses INR.
+    currency: {
+      type: String,
+      enum: ["INR"],
+      default: "INR",
     },
 
     date: {
       type: String,
-      default: () => new Date().toISOString().split("T")[0]
+      default: () => new Date().toISOString().split("T")[0],
     },
 
     description: {
       type: String,
       default: "",
-      trim: true
+      trim: true,
     },
 
     paidBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
 
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
+      default: null,
+    },
+
+    deletedAt: {
+      type: Date,
       default: null
     },
+
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null
+    },
+
 
     splitType: {
       type: String,
       enum: ["equal", "custom", "none"],
-      default: "none"
+      default: "none",
     },
 
     splits: {
       type: [splitSchema],
-      default: []
-    }
+      default: [],
+    },
   },
   { timestamps: true }
 );
 
-// Synchronous hook to ensure amount and totalAmount stay synchronized
 expenseSchema.pre("save", function () {
   if (this.amount !== undefined && this.totalAmount === undefined) {
     this.totalAmount = this.amount;
@@ -112,6 +131,8 @@ expenseSchema.pre("save", function () {
   }
 });
 
-const Expense = mongoose.models.Expense || mongoose.model("Expense", expenseSchema);
+const Expense =
+  mongoose.models.Expense ||
+  mongoose.model("Expense", expenseSchema);
 
 export default Expense;

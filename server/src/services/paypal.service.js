@@ -121,9 +121,30 @@ export const captureOrder = async (orderId) => {
 // Verify PayPal webhook signature
 export const verifyWebhookSignature = async (headers, body) => {
     const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+    
+    // Never accept an unverified webhook
     if (!webhookId) {
-        console.warn("PAYPAL_WEBHOOK_ID is not configured in environment. Skipping cryptographic verification.");
-        return { verification_status: "SUCCESS" };
+        throw new Error("PAYPAL_WEBHOOK_ID is missing. Webhook verification cannot proceed.");
+    }
+    
+    // if (!webhookId) {
+    //     console.warn("PAYPAL_WEBHOOK_ID is not configured in environment. Skipping cryptographic verification.");
+    //     return { verification_status: "SUCCESS" };
+    // }
+
+
+    const requiredHeaders = [
+        "paypal-auth-algo",
+        "paypal-cert-url",
+        "paypal-transmission-id",
+        "paypal-transmission-sig",
+        "paypal-transmission-time"
+    ];
+
+    for (const header of requiredHeaders) {
+        if (!headers[header]) {
+            throw new Error(`Missing PayPal webhook header: ${header}`);
+        }
     }
 
     const baseUrl = process.env.PAYPAL_BASE_URL || "https://api-m.sandbox.paypal.com";
@@ -149,6 +170,14 @@ export const verifyWebhookSignature = async (headers, body) => {
     });
 
     const data = await response.json();
+
+    if (!response.ok) {
+        console.error("PayPal webhook verification API error:", data);
+        throw new Error(
+            data.message || "PayPal webhook verification API failed"
+        );
+    }
+
     return data;
 };
 

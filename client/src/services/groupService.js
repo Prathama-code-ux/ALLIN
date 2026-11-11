@@ -29,6 +29,16 @@ export const groupService = {
     const response = await api.get(`/groups/${id}/contributions`);
     return response.data;
   },
+
+  async closeGroup(id) {
+    const response = await api.patch(`/groups/${id}/close`);
+    return response.data;
+  },
+
+  async deleteGroup(id) {
+    const response = await api.delete(`/groups/${id}`);
+    return response.data;
+  },
 };
 
 export default groupService;

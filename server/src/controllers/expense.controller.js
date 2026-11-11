@@ -1,6 +1,7 @@
 import Expense from "../models/expense.js";
 import Group from "../models/Group.js";
 import mongoose from "mongoose";
+import Payment from "../models/payment.js";
 
 // Create a new expense with automated split calculation
 export const createExpense = async (req, res) => {
@@ -39,13 +40,25 @@ export const createExpense = async (req, res) => {
                 });
             }
 
-            const group = await Group.findById(groupId);
-            if (!group) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Group not found"
-                });
-            }
+            const group = await Group.findOne({
+    _id: groupId,
+    deletedAt: null
+});
+
+if (!group) {
+    return res.status(404).json({
+        success: false,
+        message: "Group not found"
+    });
+}
+
+if (group.status !== "active") {
+    return res.status(400).json({
+        success: false,
+        message: "Cannot add expenses to a closed group"
+    });
+}
+           
 
             // Membership authorization
             if (req.user?._id) {
@@ -125,24 +138,25 @@ export const createExpense = async (req, res) => {
                 if (Math.abs(splitSum - expenseAmount) > 0.01) {
                     return res.status(400).json({
                         success: false,
-                        message: `Sum of splits ($${splitSum.toFixed(2)}) must equal the expense total ($${expenseAmount.toFixed(2)})`
+                       message: `Sum of splits (₹${splitSum.toFixed(2)}) must equal the expense total (₹${expenseAmount.toFixed(2)})`
                     });
                 }
             }
         }
 
         const expense = await Expense.create({
-            title: title.trim(),
-            category: validCategory,
-            amount: expenseAmount,
-            totalAmount: expenseAmount,
-            date: date || new Date().toISOString().split("T")[0],
-            description: (description || "").trim(),
-            paidBy: req.user?._id || new mongoose.Types.ObjectId("000000000000000000000001"),
-            group: groupId || null,
-            splitType: resolvedSplitType,
-            splits: resolvedSplits
-        });
+    title: title.trim(),
+    category: validCategory,
+    amount: expenseAmount,
+    totalAmount: expenseAmount,
+    currency: "INR",
+    date: date || new Date().toISOString().split("T")[0],
+    description: (description || "").trim(),
+    paidBy: req.user?._id || new mongoose.Types.ObjectId("000000000000000000000001"),
+    group: groupId || null,
+    splitType: resolvedSplitType,
+    splits: resolvedSplits
+});
 
         // Populate for returned response
         const populated = await Expense.findById(expense._id)
@@ -158,6 +172,7 @@ export const createExpense = async (req, res) => {
                 title: populated.title,
                 category: populated.category,
                 amount: populated.amount,
+                currency: populated.currency || "INR",
                 totalAmount: populated.totalAmount,
                 date: populated.date,
                 description: populated.description,
@@ -192,7 +207,7 @@ export const getExpenses = async (req, res) => {
     try {
         const { search, category, groupId } = req.query;
 
-        const filter = {};
+        const filter = {deletedAt: null};
 
         if (groupId) {
             filter.group = groupId;
@@ -221,6 +236,7 @@ export const getExpenses = async (req, res) => {
             title: e.title,
             category: e.category,
             amount: e.amount,
+            currency: e.currency || "INR",
             totalAmount: e.totalAmount || e.amount,
             date: e.date,
             description: e.description,
@@ -286,6 +302,7 @@ export const getExpenseById = async (req, res) => {
                 title: expense.title,
                 category: expense.category,
                 amount: expense.amount,
+                currency: expense.currency || "INR",
                 totalAmount: expense.totalAmount,
                 date: expense.date,
                 description: expense.description,
@@ -328,7 +345,39 @@ export const updateExpense = async (req, res) => {
             });
         }
 
-        const expense = await Expense.findById(id);
+        const expense = await Expense.findOne({
+    _id: id,
+    deletedAt: null
+});
+const group = expense.group
+    ? await Group.findById(expense.group)
+    : null;
+
+const isCreator = expense.paidBy.equals(req.user._id);
+const isAdmin = group
+    ? group.createdBy.equals(req.user._id)
+    : false;
+
+if (!isCreator && !isAdmin) {
+    return res.status(403).json({
+        success: false,
+        message: "You are not authorized to update this expense"
+    });
+}
+
+if (group?.status === "closed") {
+    return res.status(400).json({
+        success: false,
+        message: "Cannot edit expenses in a closed group"
+    });
+}
+
+if (expense.deletedAt) {
+    return res.status(404).json({
+        success: false,
+        message: "Expense not found"
+    });
+}
 
         if (!expense) {
             return res.status(404).json({
@@ -369,6 +418,7 @@ export const updateExpense = async (req, res) => {
                 title: expense.title,
                 category: expense.category,
                 amount: expense.amount,
+                currency: expense.currency || "INR",
                 date: expense.date,
                 description: expense.description
             }
@@ -383,7 +433,7 @@ export const updateExpense = async (req, res) => {
     }
 };
 
-// Delete an expense
+
 export const deleteExpense = async (req, res) => {
     try {
         const { id } = req.params;
@@ -395,7 +445,10 @@ export const deleteExpense = async (req, res) => {
             });
         }
 
-        const expense = await Expense.findById(id);
+        const expense = await Expense.findOne({
+            _id: id,
+            deletedAt: null
+        });
 
         if (!expense) {
             return res.status(404).json({
@@ -404,16 +457,63 @@ export const deleteExpense = async (req, res) => {
             });
         }
 
-        // Prevent deletion if any split is already paid
-        const hasPaidSplit = expense.splits?.some(s => s.status === "paid");
-        if (hasPaidSplit) {
-            return res.status(400).json({
+        const group = expense.group
+            ? await Group.findById(expense.group)
+            : null;
+
+        const isCreator = expense.paidBy.equals(req.user._id);
+
+        const isAdmin = group
+            ? group.createdBy.equals(req.user._id)
+            : false;
+
+        if (!isCreator && !isAdmin) {
+            return res.status(403).json({
                 success: false,
-                message: "Cannot delete expense with verified captured payments"
+                message: "You are not authorized to delete this expense"
             });
         }
 
-        await Expense.findByIdAndDelete(id);
+        if (group?.status === "closed") {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot delete expenses from a closed group"
+            });
+        }
+
+        // Check payment records, not just split statuses.
+        const paymentInProgress = await Payment.findOne({
+            expense: expense._id,
+            status: { $in: ["pending", "approved", "authorized"] }
+        });
+
+        if (paymentInProgress) {
+            return res.status(409).json({
+                success: false,
+                message: "Cannot delete an expense while a payment is pending or processing"
+            });
+        }
+
+        const hasPaidSplit = expense.splits?.some(
+            split => split.status === "paid"
+        );
+
+        const hasCapturedPayment = await Payment.exists({
+            expense: expense._id,
+            status: "captured"
+        });
+
+        if (hasPaidSplit || hasCapturedPayment) {
+            return res.status(409).json({
+                success: false,
+                message: "Cannot delete an expense with completed payments. Resolve or refund the payments first."
+            });
+        }
+
+        expense.deletedAt = new Date();
+        expense.deletedBy = req.user._id;
+
+        await expense.save();
 
         return res.status(200).json({
             success: true,
@@ -423,6 +523,7 @@ export const deleteExpense = async (req, res) => {
 
     } catch (error) {
         console.error("Delete expense error:", error);
+
         return res.status(500).json({
             success: false,
             message: "Failed to delete expense"
@@ -507,7 +608,9 @@ export const approveExpenseSplit = async (req, res) => {
 export const getExpenseSummary = async (req, res) => {
     try {
         const { groupId } = req.query;
-        const filter = groupId ? { group: groupId } : {};
+        const filter = groupId
+    ? { group: groupId, deletedAt: null }
+    : { deletedAt: null };
 
         const expenses = await Expense.find(filter);
 
