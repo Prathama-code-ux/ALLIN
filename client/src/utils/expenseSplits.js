@@ -414,3 +414,317 @@ export function computeSpendingStats(expenses = []) {
     categoriesBreakdown,
   };
 }
+
+/**
+ * Pure integer-cent proportional distributor using the Largest Remainder Method.
+ * Guarantees the distributed integer cents sum exactly to `totalCents`.
+ */
+function distributeProportionalCents(totalCents, weightsById, orderedIds) {
+  const result = {};
+  orderedIds.forEach((id) => {
+    result[id] = 0;
+  });
+
+  if (totalCents <= 0 || orderedIds.length === 0) {
+    return result;
+  }
+
+  const active = orderedIds
+    .map((id, idx) => ({ id, idx, weight: Math.max(0, Math.round(weightsById[id] || 0)) }))
+    .filter((entry) => entry.weight > 0);
+
+  const totalWeight = active.reduce((sum, entry) => sum + entry.weight, 0);
+  if (totalWeight <= 0) {
+    return result;
+  }
+
+  let allocated = 0;
+  const rows = active.map((entry) => {
+    const numerator = totalCents * entry.weight;
+    const floored = Math.floor(numerator / totalWeight);
+    const remainder = numerator % totalWeight;
+    allocated += floored;
+    return { ...entry, floored, remainder };
+  });
+
+  let remainingCents = totalCents - allocated;
+  const ranked = [...rows].sort(
+    (a, b) => b.remainder - a.remainder || a.idx - b.idx,
+  );
+
+  for (let i = 0; i < ranked.length && remainingCents > 0; i++) {
+    ranked[i].floored += 1;
+    remainingCents -= 1;
+  }
+
+  rows.forEach((row) => {
+    // `ranked` mutated the shared row objects' `floored` property
+    result[row.id] = row.floored;
+  });
+
+  return result;
+}
+
+/**
+ * Calculate deterministic, cent-exact member splits from itemized receipt entries,
+ * proportionally allocating discounts, tax, and tip across assigned items so the
+ * sum of all member shares equals the final receipt total to the exact penny.
+ */
+export function calculateItemizedReceiptSplits({
+  items = [],
+  tax = 0,
+  tip = 0,
+  discount = 0,
+  memberOrder = [],
+} = {}) {
+  const list = Array.isArray(items) ? items : [];
+
+  const parseChargeCents = (raw, label) => {
+    if (raw === "" || raw === null || raw === undefined) {
+      return { cents: 0, error: "" };
+    }
+    const num = Number(raw);
+    if (!Number.isFinite(num) || num < 0) {
+      return { cents: 0, error: `${label} cannot be negative.` };
+    }
+    return { cents: Math.round(num * 100), error: "" };
+  };
+
+  const taxParsed = parseChargeCents(tax, "Tax");
+  const tipParsed = parseChargeCents(tip, "Tip");
+  const discountParsed = parseChargeCents(discount, "Discount");
+
+  const taxCents = taxParsed.cents;
+  const tipCents = tipParsed.cents;
+  const discountCents = discountParsed.cents;
+
+  // Establish deterministic member ordering
+  const orderedMemberIds = [];
+  const seenOrder = new Set();
+  (Array.isArray(memberOrder) ? memberOrder : []).forEach((id) => {
+    const key = String(id || "");
+    if (key && !seenOrder.has(key)) {
+      seenOrder.add(key);
+      orderedMemberIds.push(key);
+    }
+  });
+  list.forEach((item) => {
+    (Array.isArray(item?.assignedMemberIds) ? item.assignedMemberIds : []).forEach((id) => {
+      const key = String(id || "");
+      if (key && !seenOrder.has(key)) {
+        seenOrder.add(key);
+        orderedMemberIds.push(key);
+      }
+    });
+  });
+
+  let validationError =
+    taxParsed.error || tipParsed.error || discountParsed.error || "";
+
+  if (list.length === 0 && !validationError) {
+    validationError = "Add or extract at least one receipt item to split.";
+  }
+
+  let itemsSubtotalCents = 0;
+  const itemsCentsByMember = {};
+  orderedMemberIds.forEach((id) => {
+    itemsCentsByMember[id] = 0;
+  });
+
+  const unassignedItemIds = [];
+  const invalidItemIds = [];
+
+  list.forEach((item, index) => {
+    const itemId = item?.id ?? `item-${index}`;
+    const name = typeof item?.name === "string" ? item.name.trim() : "";
+    const rawAmount = Number(item?.amount);
+    const itemCents = Number.isFinite(rawAmount) ? Math.round(rawAmount * 100) : 0;
+
+    if (!name || !Number.isFinite(rawAmount) || itemCents <= 0) {
+      invalidItemIds.push(itemId);
+      if (!validationError) {
+        validationError = !name
+          ? "Every receipt item must have a name."
+          : "Every receipt item must have an amount greater than $0.00.";
+      }
+    }
+
+    if (Number.isFinite(rawAmount) && itemCents > 0) {
+      itemsSubtotalCents += itemCents;
+    }
+
+    const rawAssigned = Array.isArray(item?.assignedMemberIds)
+      ? item.assignedMemberIds.map((id) => String(id || "")).filter(Boolean)
+      : [];
+    const uniqueAssignedSet = new Set(rawAssigned);
+    const assignedIds = orderedMemberIds.filter((id) => uniqueAssignedSet.has(id));
+
+    if (assignedIds.length === 0) {
+      unassignedItemIds.push(itemId);
+      return;
+    }
+
+    if (itemCents > 0) {
+      const base = Math.floor(itemCents / assignedIds.length);
+      let rem = itemCents - base * assignedIds.length;
+      assignedIds.forEach((memberId) => {
+        const shareCents = base + (rem > 0 ? 1 : 0);
+        if (rem > 0) rem -= 1;
+        itemsCentsByMember[memberId] = (itemsCentsByMember[memberId] || 0) + shareCents;
+      });
+    }
+  });
+
+  if (!validationError && unassignedItemIds.length > 0) {
+    validationError =
+      unassignedItemIds.length === 1
+        ? "Assign the highlighted receipt item to at least one group member."
+        : `Assign all ${unassignedItemIds.length} unassigned receipt items to at least one group member.`;
+  }
+
+  if (!validationError && discountCents > itemsSubtotalCents) {
+    validationError = `Discount ($${(discountCents / 100).toFixed(2)}) cannot exceed items subtotal ($${(itemsSubtotalCents / 100).toFixed(2)}).`;
+  }
+
+  const finalTotalCents = Math.max(
+    0,
+    itemsSubtotalCents - discountCents + taxCents + tipCents,
+  );
+
+  if (!validationError && finalTotalCents <= 0) {
+    validationError = "Final receipt total must be greater than $0.00.";
+  }
+
+  // Compute proportional breakdown even for partial previews when items are assigned
+  const assignedSubtotalCents = Object.values(itemsCentsByMember).reduce(
+    (sum, c) => sum + c,
+    0,
+  );
+  const canAllocateCharges =
+    assignedSubtotalCents > 0 &&
+    unassignedItemIds.length === 0 &&
+    discountCents <= itemsSubtotalCents;
+
+  const discountCentsByMember = canAllocateCharges
+    ? distributeProportionalCents(discountCents, itemsCentsByMember, orderedMemberIds)
+    : {};
+
+  const netSubtotalCentsByMember = {};
+  orderedMemberIds.forEach((id) => {
+    const itemShare = itemsCentsByMember[id] || 0;
+    const discShare = discountCentsByMember[id] || 0;
+    netSubtotalCentsByMember[id] = Math.max(0, itemShare - discShare);
+  });
+
+  const netTotalWeight = Object.values(netSubtotalCentsByMember).reduce(
+    (sum, c) => sum + c,
+    0,
+  );
+  const taxTipWeights =
+    netTotalWeight > 0 ? netSubtotalCentsByMember : itemsCentsByMember;
+
+  const taxCentsByMember = canAllocateCharges
+    ? distributeProportionalCents(taxCents, taxTipWeights, orderedMemberIds)
+    : {};
+  const tipCentsByMember = canAllocateCharges
+    ? distributeProportionalCents(tipCents, taxTipWeights, orderedMemberIds)
+    : {};
+
+  const memberBreakdown = {};
+  const sharesByMember = {};
+  const splits = [];
+
+  orderedMemberIds.forEach((id) => {
+    const itemShareCents = itemsCentsByMember[id] || 0;
+    const discountShareCents = discountCentsByMember[id] || 0;
+    const taxShareCents = taxCentsByMember[id] || 0;
+    const tipShareCents = tipCentsByMember[id] || 0;
+    const totalShareCents =
+      itemShareCents - discountShareCents + taxShareCents + tipShareCents;
+
+    memberBreakdown[id] = {
+      userId: id,
+      itemsAmount: Number((itemShareCents / 100).toFixed(2)),
+      discountAmount: Number((discountShareCents / 100).toFixed(2)),
+      taxAmount: Number((taxShareCents / 100).toFixed(2)),
+      tipAmount: Number((tipShareCents / 100).toFixed(2)),
+      totalAmount: Number((totalShareCents / 100).toFixed(2)),
+      totalCents: totalShareCents,
+    };
+
+    const dollarShare = Number((totalShareCents / 100).toFixed(2));
+    sharesByMember[id] = dollarShare;
+
+    if (totalShareCents > 0) {
+      splits.push({ userId: id, amount: dollarShare });
+    }
+  });
+
+  const allocatedTotalCents = splits.reduce(
+    (sum, s) => sum + Math.round(s.amount * 100),
+    0,
+  );
+
+  const isValid =
+    !validationError &&
+    unassignedItemIds.length === 0 &&
+    invalidItemIds.length === 0 &&
+    finalTotalCents > 0 &&
+    splits.length > 0 &&
+    allocatedTotalCents === finalTotalCents;
+
+  return {
+    isValid,
+    error: validationError,
+    itemsSubtotal: Number((itemsSubtotalCents / 100).toFixed(2)),
+    discountAmount: Number((discountCents / 100).toFixed(2)),
+    taxAmount: Number((taxCents / 100).toFixed(2)),
+    tipAmount: Number((tipCents / 100).toFixed(2)),
+    finalTotal: Number((finalTotalCents / 100).toFixed(2)),
+    finalTotalCents,
+    allocatedTotal: Number((allocatedTotalCents / 100).toFixed(2)),
+    unassignedItemIds,
+    invalidItemIds,
+    memberBreakdown,
+    sharesByMember,
+    splits: isValid ? splits : [],
+  };
+}
+
+/**
+ * Format a clean, auditable summary description for an itemized receipt expense.
+ */
+export function buildReceiptDescription({
+  merchantName = "",
+  items = [],
+  tax = 0,
+  tip = 0,
+  discount = 0,
+  finalTotal = 0,
+  currency = null,
+} = {}) {
+  const parts = [];
+  if (merchantName) {
+    parts.push(`Receipt from ${merchantName}`);
+  }
+  if (Array.isArray(items) && items.length > 0) {
+    const itemSummary = items
+      .slice(0, 12)
+      .map((item) => `${item.name} ($${Number(item.amount || 0).toFixed(2)})`)
+      .join(", ");
+    const extra = items.length > 12 ? ` +${items.length - 12} more` : "";
+    parts.push(`Items: ${itemSummary}${extra}`);
+  }
+  const charges = [];
+  if (Number(discount) > 0) charges.push(`Discount -$${Number(discount).toFixed(2)}`);
+  if (Number(tax) > 0) charges.push(`Tax $${Number(tax).toFixed(2)}`);
+  if (Number(tip) > 0) charges.push(`Tip $${Number(tip).toFixed(2)}`);
+  if (charges.length > 0) {
+    parts.push(charges.join(" | "));
+  }
+  if (currency && currency !== "USD") {
+    parts.push(`Original receipt currency: ${currency}`);
+  }
+  parts.push(`Total: $${Number(finalTotal || 0).toFixed(2)} USD`);
+  return parts.join(" • ");
+}

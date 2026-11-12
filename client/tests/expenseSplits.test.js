@@ -7,6 +7,8 @@ import {
   validateFixedSplits,
   computeSpendingStats,
   buildEvenPercentages,
+  calculateItemizedReceiptSplits,
+  buildReceiptDescription,
 } from "../src/utils/expenseSplits.js";
 
 test("formatUSD formats positive, zero, and negative USD amounts consistently", () => {
@@ -126,5 +128,92 @@ test("computeSpendingStats calculates category percentages relative to total spe
   assert.equal(stats.categoriesBreakdown[0].percentage, 75);
   assert.equal(stats.categoriesBreakdown[1].name, "Travel");
   assert.equal(stats.categoriesBreakdown[1].percentage, 25);
+});
+
+test("calculateItemizedReceiptSplits divides shared items, discount, tax, and tip with exact cent accuracy", () => {
+  const res = calculateItemizedReceiptSplits({
+    items: [
+      { id: "i1", name: "Pasta", amount: 20, assignedMemberIds: ["u1"] },
+      { id: "i2", name: "Shared Pizza", amount: 10, assignedMemberIds: ["u1", "u2", "u3"] },
+    ],
+    discount: 3,
+    tax: 2.7,
+    tip: 5.4,
+    memberOrder: ["u1", "u2", "u3"],
+  });
+
+  assert.equal(res.isValid, true);
+  assert.equal(res.itemsSubtotal, 30);
+  assert.equal(res.discountAmount, 3);
+  assert.equal(res.taxAmount, 2.7);
+  assert.equal(res.tipAmount, 5.4);
+  assert.equal(res.finalTotal, 35.1);
+  assert.equal(res.allocatedTotal, 35.1);
+
+  const splitSumCents = res.splits.reduce((sum, s) => sum + Math.round(s.amount * 100), 0);
+  assert.equal(splitSumCents, Math.round(res.finalTotal * 100));
+  assert.ok(res.memberBreakdown.u1.totalAmount > res.memberBreakdown.u2.totalAmount);
+});
+
+test("calculateItemizedReceiptSplits preserves exact penny sum under tricky remainders and excludes 0-share members", () => {
+  const res = calculateItemizedReceiptSplits({
+    items: [
+      { id: "i1", name: "Steak", amount: 17.33, assignedMemberIds: ["u1", "u2"] },
+      { id: "i2", name: "Salad", amount: 9.19, assignedMemberIds: ["u2", "u3"] },
+    ],
+    discount: 1.07,
+    tax: 2.13,
+    tip: 4.55,
+    memberOrder: ["u1", "u2", "u3", "u4"], // u4 did not share anything
+  });
+
+  assert.equal(res.isValid, true);
+  assert.equal(res.finalTotal, 32.13);
+  assert.equal(res.splits.length, 3);
+  assert.equal(res.sharesByMember.u4, 0);
+
+  const sum = res.splits.reduce((acc, s) => acc + Math.round(s.amount * 100), 0);
+  assert.equal(sum, 3213);
+});
+
+test("calculateItemizedReceiptSplits rejects unassigned items, over-discount, and invalid item prices", () => {
+  const unassigned = calculateItemizedReceiptSplits({
+    items: [{ id: "i1", name: "Coffee", amount: 5, assignedMemberIds: [] }],
+    memberOrder: ["u1", "u2"],
+  });
+  assert.equal(unassigned.isValid, false);
+  assert.deepEqual(unassigned.unassignedItemIds, ["i1"]);
+
+  const overDiscount = calculateItemizedReceiptSplits({
+    items: [{ id: "i1", name: "Coffee", amount: 5, assignedMemberIds: ["u1"] }],
+    discount: 6,
+    memberOrder: ["u1"],
+  });
+  assert.equal(overDiscount.isValid, false);
+  assert.match(overDiscount.error, /cannot exceed items subtotal/i);
+
+  const badPrice = calculateItemizedReceiptSplits({
+    items: [{ id: "i1", name: "Coffee", amount: 0, assignedMemberIds: ["u1"] }],
+    memberOrder: ["u1"],
+  });
+  assert.equal(badPrice.isValid, false);
+});
+
+test("buildReceiptDescription formats clear receipt audit summary", () => {
+  const desc = buildReceiptDescription({
+    merchantName: "Harbor Grill",
+    items: [
+      { name: "Tacos", amount: 14 },
+      { name: "Soda", amount: 3.5 },
+    ],
+    tax: 1.5,
+    tip: 3,
+    discount: 1,
+    finalTotal: 21,
+    currency: "USD",
+  });
+  assert.match(desc, /Harbor Grill/);
+  assert.match(desc, /Tacos \(\$14\.00\)/);
+  assert.match(desc, /Total: \$21\.00 USD/);
 });
 

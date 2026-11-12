@@ -8,6 +8,7 @@ import groupRoutes from "./routes/groupRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import paymentRoutes from "./routes/payment.route.js";
 import settlementRoutes from "./routes/settlementRoutes.js";
+import aiRoutes from "./routes/aiRoutes.js";
 import register, { httpRequestDuration } from "./config/metrics.js";
 
 const app = express();
@@ -40,6 +41,7 @@ app.use(
     })
 );
 
+app.use("/api/ai", express.json({ limit: "8mb" }));
 app.use(express.json());
 
 // Prometheus HTTP request duration tracking middleware
@@ -77,6 +79,7 @@ app.use("/api/groups", groupRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/settlements", settlementRoutes);
+app.use("/api/ai", aiRoutes);
 
 // Health check endpoints (both /health and /api/health for compatibility)
 app.get(["/health", "/api/health"], (req, res) => {
@@ -122,9 +125,15 @@ app.use((err, req, res, next) => {
 
     console.error("Internal server error:", err);
 
-    return res.status(err.status || 500).json({
+    const status = err.type === "entity.too.large" ? 413 : err.status || 500;
+    const message =
+        err.type === "entity.too.large"
+            ? "Uploaded receipt image exceeds the maximum allowed payload size (5 MB)."
+            : err.message || "internal server error";
+
+    return res.status(status).json({
         success: false,
-        message: err.message || "internal server error"
+        message
     });
 });
 

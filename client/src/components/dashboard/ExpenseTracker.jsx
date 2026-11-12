@@ -13,7 +13,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Lock,
+  Sparkles,
 } from "lucide-react";
+import ReceiptScannerModal from "./ReceiptScannerModal";
 import { parsePaymentQR } from "../../utils/parsePaymentQR";
 import { formatUSD, validatePositiveAmount } from "../../utils/currency";
 import {
@@ -119,6 +121,7 @@ export default function ExpenseTracker({
   poolData = { availablePoolBalance: 0 },
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [showReceiptScanner, setShowReceiptScanner] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editingHasPaidSplit, setEditingHasPaidSplit] = useState(false);
   const [formData, setFormData] = useState(() => getEmptyForm(""));
@@ -604,6 +607,14 @@ export default function ExpenseTracker({
         </div>
 
         <div className="expense-hero-actions">
+          <button
+            type="button"
+            className="scan-receipt-ai-button"
+            onClick={() => setShowReceiptScanner(true)}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Scan Receipt with AI</span>
+          </button>
           {onOpenQRScanner && (
             <button
               type="button"
@@ -768,19 +779,32 @@ export default function ExpenseTracker({
               </button>
             </div>
 
-            {editingId === null && onOpenQRScanner && (
+            {editingId === null && (
               <div className="expense-modal-qr-row">
                 <button
                   type="button"
                   onClick={() => {
                     setShowForm(false);
-                    onOpenQRScanner();
+                    setShowReceiptScanner(true);
                   }}
-                  className="expense-qr-trigger"
+                  className="expense-ai-trigger"
                 >
-                  <ScanLine className="w-4 h-4" />
-                  <span>Scan Bill / Merchant QR</span>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Scan Receipt with AI</span>
                 </button>
+                {onOpenQRScanner && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      onOpenQRScanner();
+                    }}
+                    className="expense-qr-trigger"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    <span>Scan Bill / Merchant QR</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -1487,6 +1511,15 @@ export default function ExpenseTracker({
           </div>
         )}
       </section>
+
+      <ReceiptScannerModal
+        isOpen={showReceiptScanner}
+        onClose={() => setShowReceiptScanner(false)}
+        groups={openGroups}
+        defaultGroupId={defaultOpenGroupId}
+        onConfirmExpense={onAddExpense}
+        onSwitchToManual={openAddForm}
+      />
     </div>
   );
 }
