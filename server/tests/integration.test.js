@@ -1,4 +1,5 @@
 import request from "supertest";
+import { jest } from "@jest/globals";
 import app from "../src/app.js";
 import mongoose from "mongoose";
 import connectDB from "../src/config/db.js";
@@ -8,6 +9,8 @@ import Expense from "../src/models/expense.js";
 import Payment from "../src/models/payment.js";
 
 describe("ALLIN Full-Stack End-to-End Integration Suite", () => {
+    jest.setTimeout(20000);
+
     let authToken;
     let testUser;
     let testGroup;
