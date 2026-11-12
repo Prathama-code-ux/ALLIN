@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const splitSchema = new mongoose.Schema(
@@ -98,17 +97,33 @@ const expenseSchema = new mongoose.Schema(
       default: null,
     },
 
+    paymentSource: {
+      type: String,
+      enum: ["pool", "personal"],
+      default: "personal",
+    },
+
+    status: {
+      type: String,
+      enum: ["pending", "paid", "partially_paid", "cancelled"],
+      default: "pending",
+    },
+
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+
     deletedAt: {
       type: Date,
-      default: null
+      default: null,
     },
 
     deletedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      default: null
+      default: null,
     },
-
 
     splitType: {
       type: String,

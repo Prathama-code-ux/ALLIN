@@ -7,6 +7,7 @@ import {
 } from "../services/paymentApi";
 import groupService from "../services/groupService";
 import expenseService from "../services/expenseService";
+import settlementService from "../services/settlementService";
 
 import Sidebar from "../components/dashboard/Sidebar";
 import Header from "../components/dashboard/Header";
@@ -36,8 +37,18 @@ export default function DashboardPage() {
   const [contributions, setContributions] = useState([]);
   const [poolData, setPoolData] = useState({
     totalPool: 0,
+    totalConfirmedContributions: 0,
+    availablePoolBalance: 0,
+    poolFundedExpenses: 0,
+    personalAdvances: 0,
     targetAmount: 0,
     remaining: 0,
+  });
+
+  const [settlements, setSettlements] = useState({
+    debts: [],
+    credits: [],
+    summary: { totalOwed: 0, totalOwedToUser: 0, netBalance: 0 },
   });
 
   // Expenses State (Loaded from MongoDB)
@@ -97,12 +108,40 @@ export default function DashboardPage() {
         setContributions(data.contributions || []);
         setPoolData({
           totalPool: Number(data.totalPool ?? 0),
+          totalConfirmedContributions: Number(
+            data.totalConfirmedContributions ?? data.totalPool ?? 0,
+          ),
+          availablePoolBalance: Number(data.availablePoolBalance ?? 0),
+          poolFundedExpenses: Number(data.poolFundedExpenses ?? 0),
+          personalAdvances: Number(data.personalAdvances ?? 0),
           targetAmount: Number(data.targetAmount ?? 0),
           remaining: Number(data.remaining ?? 0),
         });
       }
     } catch (err) {
       console.warn("Could not load contributions:", err.message);
+    }
+  }, []);
+
+  // 2b. Fetch settlements for current user & group
+  const loadSettlements = useCallback(async (groupId) => {
+    try {
+      const data = await settlementService.getMySettlements(
+        groupId ? { groupId } : {},
+      );
+      if (data.success) {
+        setSettlements({
+          debts: data.debts || [],
+          credits: data.credits || [],
+          summary: data.summary || {
+            totalOwed: 0,
+            totalOwedToUser: 0,
+            netBalance: 0,
+          },
+        });
+      }
+    } catch (err) {
+      console.warn("Could not load settlements:", err.message);
     }
   }, []);
 
@@ -136,15 +175,19 @@ export default function DashboardPage() {
     if (activeGroup?._id) {
       await Promise.all([
         loadGroupContributions(activeGroup._id),
+        loadSettlements(activeGroup._id),
         loadExpenses(activeGroup._id),
         loadTransactions(activeGroup._id),
       ]);
+    } else {
+      await loadSettlements();
     }
     setRefreshing(false);
   }, [
     loadGroups,
     activeGroup,
     loadGroupContributions,
+    loadSettlements,
     loadExpenses,
     loadTransactions,
   ]);
@@ -152,16 +195,24 @@ export default function DashboardPage() {
   // Initial load
   useEffect(() => {
     loadGroups();
-  }, [loadGroups]);
+    loadSettlements();
+  }, [loadGroups, loadSettlements]);
 
   // Reload data when active group changes
   useEffect(() => {
     if (activeGroup?._id) {
       loadGroupContributions(activeGroup._id);
+      loadSettlements(activeGroup._id);
       loadExpenses(activeGroup._id);
       loadTransactions(activeGroup._id);
     }
-  }, [activeGroup, loadGroupContributions, loadExpenses, loadTransactions]);
+  }, [
+    activeGroup,
+    loadGroupContributions,
+    loadSettlements,
+    loadExpenses,
+    loadTransactions,
+  ]);
 
   // 5. Handle PayPal redirect / callback lifecycle
   useEffect(() => {
@@ -216,12 +267,16 @@ export default function DashboardPage() {
             `Payment successful! Captured $${capturedAmount} via PayPal Sandbox.`,
           );
 
-          // Refresh live contributions and transaction log immediately
+          // Refresh live contributions, settlements, and transaction log immediately
           if (activeGroup?._id) {
             await Promise.all([
               loadGroupContributions(activeGroup._id),
+              loadSettlements(activeGroup._id),
+              loadExpenses(activeGroup._id),
               loadTransactions(activeGroup._id),
             ]);
+          } else {
+            await loadSettlements();
           }
         } catch (error) {
           console.error("Payment capture failed:", error);
@@ -235,7 +290,13 @@ export default function DashboardPage() {
 
       capturePayment();
     }
-  }, [activeGroup, loadGroupContributions, loadTransactions, loadExpenses]);
+  }, [
+    activeGroup,
+    loadGroupContributions,
+    loadSettlements,
+    loadTransactions,
+    loadExpenses,
+  ]);
 
   // Initiate PayPal order creation for an expense split or group pool
   const handlePayNow = async (payTarget) => {
@@ -250,17 +311,20 @@ export default function DashboardPage() {
 
       if (typeof payTarget === "object" && payTarget !== null) {
         payload = {
+          settlementId: payTarget.settlementId || null,
           expenseId: payTarget.expenseId || null,
           groupId: payTarget.groupId || activeGroup?._id || null,
+          purpose: payTarget.purpose || undefined,
           amount: payTarget.amount || undefined,
           currency: "USD",
         };
       } else {
         // If a number was passed directly
         payload = {
-          amount: Number(payTarget || 55.35),
+          amount: Number(payTarget || 25.0),
           currency: "USD",
           groupId: activeGroup?._id || null,
+          purpose: "GROUP_CONTRIBUTION",
         };
       }
 
@@ -686,12 +750,15 @@ export default function DashboardPage() {
                 paymentCompleted={paymentCompleted}
                 totalPool={poolData.totalPool}
                 targetAmount={poolData.targetAmount}
+                availablePoolBalance={poolData.availablePoolBalance}
                 totalExpenses={totalExpenseSum}
                 userShare={userShare}
                 myPaymentStatus={myPaymentStatus}
                 nextPendingSplit={nextPendingSplit}
                 onApproveSplit={handleApproveSplit}
                 activeGroup={activeGroup}
+                settlementsSummary={settlements.summary}
+                onOpenSettlements={() => setActivePage("Payments")}
               />
 
               {/* Split & Transactions Grid */}
@@ -703,6 +770,7 @@ export default function DashboardPage() {
                   paymentLoading={paymentLoading}
                   paymentCompleted={paymentCompleted}
                   currentUserId={user?.id}
+                  onOpenSettlements={() => setActivePage("Payments")}
                 />
 
                 <Transactions
@@ -744,6 +812,7 @@ export default function DashboardPage() {
               onOpenQRScanner={() => setQrScannerOpen(true)}
               scannedQRData={scannedQRData}
               onQRDataHandled={clearScannedQRData}
+              poolData={poolData}
             />
           )}
 
@@ -753,6 +822,7 @@ export default function DashboardPage() {
               activeGroup={activeGroup}
               contributions={contributions}
               poolData={poolData}
+              settlements={settlements}
               onPayNow={handlePayNow}
               paymentLoading={paymentLoading}
               paymentCompleted={paymentCompleted}

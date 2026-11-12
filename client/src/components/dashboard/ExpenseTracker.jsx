@@ -102,6 +102,7 @@ const getEmptyForm = (defaultGroupId = "") => ({
   date: getTodayISO(),
   description: "",
   groupId: defaultGroupId,
+  paymentSource: "personal",
 });
 
 export default function ExpenseTracker({
@@ -115,6 +116,7 @@ export default function ExpenseTracker({
   onOpenQRScanner,
   scannedQRData = "",
   onQRDataHandled,
+  poolData = { availablePoolBalance: 0 },
 }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -252,6 +254,7 @@ export default function ExpenseTracker({
       date: expense.date || getTodayISO(),
       description: expense.description || "",
       groupId: expenseGroupId,
+      paymentSource: expense.paymentSource || "personal",
     });
 
     const existingSplits = Array.isArray(expense.splits) ? expense.splits : [];
@@ -450,6 +453,16 @@ export default function ExpenseTracker({
       return;
     }
 
+    if (formData.groupId && formData.paymentSource === "pool" && !editingHasPaidSplit) {
+      const avail = Number(poolData?.availablePoolBalance || 0);
+      if (amountCheck.value > avail) {
+        setFormError(
+          `Pool balance insufficient ($${avail.toFixed(2)} available). Please contribute to pool or select Personal Advance.`
+        );
+        return;
+      }
+    }
+
     if (formData.groupId && splitMode !== "none" && !editingHasPaidSplit) {
       if (!splitEvaluation.isValid) {
         setFormError(
@@ -467,6 +480,7 @@ export default function ExpenseTracker({
         category: formData.category,
         date: formData.date,
         description: formData.description.trim(),
+        paymentSource: formData.groupId ? (formData.paymentSource || "personal") : "personal",
       };
 
       if (editingId !== null) {
@@ -857,6 +871,52 @@ export default function ExpenseTracker({
                 )
               )}
 
+              {formData.groupId && (
+                <div className="form-group">
+                  <label className="text-xs font-semibold text-[#94A3B8]">Payment Source *</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-1.5">
+                    <button
+                      type="button"
+                      disabled={editingHasPaidSplit}
+                      onClick={() => setFormData({ ...formData, paymentSource: "personal" })}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                        (formData.paymentSource || "personal") === "personal"
+                          ? "bg-[#a66bff]/15 border-[#a66bff] shadow-[0_0_15px_rgba(166,107,255,0.2)] text-white"
+                          : "bg-white/[0.03] border-white/10 text-[#94A3B8] hover:border-white/20"
+                      }`}
+                    >
+                      <div className="font-bold text-xs flex items-center gap-1.5 text-[#F3F6F6]">
+                        <span>👤 Personal Advance</span>
+                      </div>
+                      <p className="text-[11px] text-[#94A3B8] mt-1">
+                        You pay upfront. Members reimburse you their shares.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={editingHasPaidSplit}
+                      onClick={() => setFormData({ ...formData, paymentSource: "pool" })}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                        formData.paymentSource === "pool"
+                          ? "bg-emerald-500/15 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)] text-white"
+                          : "bg-white/[0.03] border-white/10 text-[#94A3B8] hover:border-white/20"
+                      }`}
+                    >
+                      <div className="font-bold text-xs flex items-center justify-between text-[#F3F6F6]">
+                        <span>🏦 Group Pool Funds</span>
+                        <span className="text-[11px] font-mono font-bold text-emerald-400">
+                          ${(poolData?.availablePoolBalance || 0).toFixed(2)} avail
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#94A3B8] mt-1">
+                        Deducts from shared pool balance. No member debts created.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="form-row">
                 <div className="form-group">
                   <label htmlFor="expense-category">Category *</label>
@@ -1240,6 +1300,17 @@ export default function ExpenseTracker({
 
                       <div className="expense-meta-line">
                         <span>{formatDate(exp.date)}</span>
+                        {exp.paymentSource === "pool" ? (
+                          <>
+                            <span>•</span>
+                            <span className="text-emerald-400 font-semibold">🏦 Pool Funded</span>
+                          </>
+                        ) : exp.group ? (
+                          <>
+                            <span>•</span>
+                            <span className="text-[#c49cff] font-medium">👤 Personal Advance</span>
+                          </>
+                        ) : null}
                         {exp.paidBy && (
                           <>
                             <span>•</span>

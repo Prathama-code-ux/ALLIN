@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Resolve unified API base URL
-const rawBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const rawBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 const baseURL = rawBase.endsWith('/api')
   ? rawBase
   : `${rawBase.replace(/\/+$/, '')}/api`;
