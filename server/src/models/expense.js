@@ -67,11 +67,12 @@ const expenseSchema = new mongoose.Schema(
       },
     },
 
-    // ALLIN expense tracking uses INR.
+    // ALLIN standardises new expenses on USD while retaining INR in the enum
+    // so historical stored records can be read without silent mutation.
     currency: {
       type: String,
-      enum: ["INR"],
-      default: "INR",
+      enum: ["USD", "INR"],
+      default: "USD",
     },
 
     date: {

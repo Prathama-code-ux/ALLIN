@@ -3,12 +3,151 @@ import Group from "../models/Group.js";
 import mongoose from "mongoose";
 import Payment from "../models/payment.js";
 
+const VALID_CATEGORIES = [
+    "Food", "Transport", "Shopping", "Entertainment", "Bills", "Health", "Travel", "Other"
+];
+
+const formatExpenseResponse = (e) => ({
+    id: e._id,
+    _id: e._id,
+    title: e.title,
+    category: e.category,
+    amount: e.amount,
+    currency: e.currency || "USD",
+    totalAmount: e.totalAmount ?? e.amount,
+    date: e.date,
+    description: e.description,
+    paidBy: e.paidBy?.name || null,
+    paidById: e.paidBy?._id || e.paidBy || null,
+    group: e.group,
+    splitType: e.splitType || "none",
+    splits: (e.splits || []).map((s) => ({
+        userId: s.user?._id || s.user,
+        name: s.user?.name || "Member",
+        email: s.user?.email,
+        amount: s.amount,
+        status: s.status,
+        approvedAt: s.approvedAt,
+        paidAt: s.paidAt
+    })),
+    createdAt: e.createdAt
+});
+
+const distributeEqualMemberSplits = (memberIds, expenseAmount, currentUserId) => {
+    const totalCents = Math.round(expenseAmount * 100);
+    const count = memberIds.length;
+    const baseCents = Math.floor(totalCents / count);
+    let remainder = totalCents - baseCents * count;
+
+    return memberIds.map((memberId) => {
+        const cents = baseCents + (remainder > 0 ? 1 : 0);
+        if (remainder > 0) remainder -= 1;
+
+        const isPayer = currentUserId && String(memberId) === String(currentUserId);
+        return {
+            user: memberId,
+            amount: Number((cents / 100).toFixed(2)),
+            status: isPayer ? "approved" : "pending",
+            approvedAt: isPayer ? new Date() : null
+        };
+    });
+};
+
+const resolveExpenseSplits = ({ group, expenseAmount, splitType, splits, currentUserId }) => {
+    const requestedType = splitType || "equal";
+
+    if (requestedType === "none") {
+        return { error: null, splitType: "none", splits: [] };
+    }
+
+    if (!group || !Array.isArray(group.members) || group.members.length === 0) {
+        return { error: null, splitType: "none", splits: [] };
+    }
+
+    const hasExplicitSplits = Array.isArray(splits) && splits.length > 0;
+
+    if (requestedType === "equal" && !hasExplicitSplits) {
+        return {
+            error: null,
+            splitType: "equal",
+            splits: distributeEqualMemberSplits(group.members, expenseAmount, currentUserId)
+        };
+    }
+
+    if ((requestedType === "custom" || requestedType === "equal") && hasExplicitSplits) {
+        let splitSum = 0;
+        const seenUsers = new Set();
+        const resolvedSplits = [];
+
+        for (const s of splits) {
+            const splitUserId = s.user || s.userId;
+
+            if (!splitUserId || !mongoose.Types.ObjectId.isValid(splitUserId)) {
+                return { error: "Each split must specify a valid user" };
+            }
+
+            const uidKey = String(splitUserId);
+            if (seenUsers.has(uidKey)) {
+                return { error: "Duplicate member entries are not allowed in splits" };
+            }
+            seenUsers.add(uidKey);
+
+            const isMember = group.members.some((m) => m.equals(splitUserId));
+            if (!isMember) {
+                return { error: `User ${splitUserId} is not a member of the group` };
+            }
+
+            const splitAmt = Number(s.amount);
+            if (!Number.isFinite(splitAmt) || splitAmt <= 0) {
+                return { error: "Each split amount must be a positive number" };
+            }
+
+            if (splitAmt > expenseAmount + 0.01) {
+                return { error: "A member split cannot exceed the total expense amount" };
+            }
+
+            splitSum += splitAmt;
+            const isPayer = currentUserId && uidKey === String(currentUserId);
+            const safeStatus = isPayer
+                ? "approved"
+                : s.status === "approved"
+                    ? "approved"
+                    : "pending";
+
+            resolvedSplits.push({
+                user: splitUserId,
+                amount: Number(splitAmt.toFixed(2)),
+                status: safeStatus,
+                approvedAt: safeStatus === "approved" ? new Date() : null
+            });
+        }
+
+        if (Math.abs(splitSum - expenseAmount) > 0.01) {
+            return {
+                error: `Sum of splits ($${splitSum.toFixed(2)}) must equal the expense total ($${expenseAmount.toFixed(2)})`
+            };
+        }
+
+        return {
+            error: null,
+            splitType: requestedType,
+            splits: resolvedSplits
+        };
+    }
+
+    if (requestedType === "custom") {
+        return { error: "At least one member split is required for a custom split" };
+    }
+
+    return { error: null, splitType: "none", splits: [] };
+};
+
 // Create a new expense with automated split calculation
 export const createExpense = async (req, res) => {
     try {
         const { title, amount, totalAmount, category, date, description, groupId, splitType, splits } = req.body;
 
-        const expenseAmount = Number(amount ?? totalAmount);
+        const rawAmount = Number(amount ?? totalAmount);
 
         if (!title || !title.trim()) {
             return res.status(400).json({
@@ -17,19 +156,18 @@ export const createExpense = async (req, res) => {
             });
         }
 
-        if (isNaN(expenseAmount) || expenseAmount <= 0) {
+        if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
             return res.status(400).json({
                 success: false,
                 message: "A valid positive expense amount is required"
             });
         }
 
-        const validCategory = category && [
-            "Food", "Transport", "Shopping", "Entertainment", "Bills", "Health", "Travel", "Other"
-        ].includes(category) ? category : "Other";
+        const expenseAmount = Number(rawAmount.toFixed(2));
+        const validCategory = category && VALID_CATEGORIES.includes(category) ? category : "Other";
 
         let resolvedSplits = [];
-        let resolvedSplitType = splitType || "none";
+        let resolvedSplitType = "none";
 
         // Group validation & split generation
         if (groupId) {
@@ -41,28 +179,27 @@ export const createExpense = async (req, res) => {
             }
 
             const group = await Group.findOne({
-    _id: groupId,
-    deletedAt: null
-});
+                _id: groupId,
+                deletedAt: null
+            });
 
-if (!group) {
-    return res.status(404).json({
-        success: false,
-        message: "Group not found"
-    });
-}
+            if (!group) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Group not found"
+                });
+            }
 
-if (group.status !== "active") {
-    return res.status(400).json({
-        success: false,
-        message: "Cannot add expenses to a closed group"
-    });
-}
-           
+            if (group.status !== "active") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Cannot add expenses to a closed group"
+                });
+            }
 
             // Membership authorization
             if (req.user?._id) {
-                const isMember = group.members.some(m => m.equals(req.user._id));
+                const isMember = group.members.some((m) => m.equals(req.user._id));
                 if (!isMember) {
                     return res.status(403).json({
                         success: false,
@@ -71,92 +208,43 @@ if (group.status !== "active") {
                 }
             }
 
-            // If splitType is equal or not provided, calculate equal splits across group members
-            if (resolvedSplitType === "equal" || (!splits && group.members.length > 0)) {
-                resolvedSplitType = "equal";
-                const memberCount = group.members.length;
-                const baseShare = Math.floor((expenseAmount / memberCount) * 100) / 100;
-                let remainderCents = Math.round((expenseAmount - (baseShare * memberCount)) * 100);
+            const splitResult = resolveExpenseSplits({
+                group,
+                expenseAmount,
+                splitType,
+                splits,
+                currentUserId: req.user?._id
+            });
 
-                resolvedSplits = group.members.map(memberId => {
-                    const extraCent = remainderCents > 0 ? 0.01 : 0;
-                    if (remainderCents > 0) remainderCents--;
-
-                    const memberAmount = Number((baseShare + extraCent).toFixed(2));
-                    const isPayer = req.user?._id && memberId.equals(req.user._id);
-
-                    return {
-                        user: memberId,
-                        amount: memberAmount,
-                        status: isPayer ? "approved" : "pending",
-                        approvedAt: isPayer ? new Date() : null
-                    };
+            if (splitResult.error) {
+                return res.status(400).json({
+                    success: false,
+                    message: splitResult.error
                 });
-            } else if (resolvedSplitType === "custom" && Array.isArray(splits) && splits.length > 0) {
-                // Validate custom splits
-                let splitSum = 0;
-                resolvedSplits = [];
-
-                for (const s of splits) {
-                    const splitUserId = s.user || s.userId;
-                    const splitAmt = Number(s.amount);
-
-                    if (!splitUserId || !mongoose.Types.ObjectId.isValid(splitUserId)) {
-                        return res.status(400).json({
-                            success: false,
-                            message: "Each split must specify a valid user"
-                        });
-                    }
-
-                    const isMember = group.members.some(m => m.equals(splitUserId));
-                    if (!isMember) {
-                        return res.status(400).json({
-                            success: false,
-                            message: `User ${splitUserId} is not a member of the group`
-                        });
-                    }
-
-                    if (isNaN(splitAmt) || splitAmt <= 0) {
-                        return res.status(400).json({
-                            success: false,
-                            message: "Each split amount must be a positive number"
-                        });
-                    }
-
-                    splitSum += splitAmt;
-                    const isPayer = req.user?._id && String(splitUserId) === String(req.user._id);
-
-                    resolvedSplits.push({
-                        user: splitUserId,
-                        amount: Number(splitAmt.toFixed(2)),
-                        status: isPayer ? "approved" : (s.status || "pending"),
-                        approvedAt: isPayer ? new Date() : null
-                    });
-                }
-
-                // Check that split sum equals total amount (within 0.01 tolerance)
-                if (Math.abs(splitSum - expenseAmount) > 0.01) {
-                    return res.status(400).json({
-                        success: false,
-                       message: `Sum of splits (₹${splitSum.toFixed(2)}) must equal the expense total (₹${expenseAmount.toFixed(2)})`
-                    });
-                }
             }
+
+            resolvedSplitType = splitResult.splitType;
+            resolvedSplits = splitResult.splits;
+        } else if (splitType && splitType !== "none") {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a group to split an expense among members"
+            });
         }
 
         const expense = await Expense.create({
-    title: title.trim(),
-    category: validCategory,
-    amount: expenseAmount,
-    totalAmount: expenseAmount,
-    currency: "INR",
-    date: date || new Date().toISOString().split("T")[0],
-    description: (description || "").trim(),
-    paidBy: req.user?._id || new mongoose.Types.ObjectId("000000000000000000000001"),
-    group: groupId || null,
-    splitType: resolvedSplitType,
-    splits: resolvedSplits
-});
+            title: title.trim(),
+            category: validCategory,
+            amount: expenseAmount,
+            totalAmount: expenseAmount,
+            currency: "USD",
+            date: date || new Date().toISOString().split("T")[0],
+            description: (description || "").trim(),
+            paidBy: req.user?._id || new mongoose.Types.ObjectId("000000000000000000000001"),
+            group: groupId || null,
+            splitType: resolvedSplitType,
+            splits: resolvedSplits
+        });
 
         // Populate for returned response
         const populated = await Expense.findById(expense._id)
@@ -166,31 +254,7 @@ if (group.status !== "active") {
         return res.status(201).json({
             success: true,
             message: "Expense recorded successfully",
-            expense: {
-                id: populated._id,
-                _id: populated._id,
-                title: populated.title,
-                category: populated.category,
-                amount: populated.amount,
-                currency: populated.currency || "INR",
-                totalAmount: populated.totalAmount,
-                date: populated.date,
-                description: populated.description,
-                group: populated.group,
-                paidBy: populated.paidBy?.name || "Member",
-                paidById: populated.paidBy?._id,
-                splitType: populated.splitType,
-                splits: (populated.splits || []).map(s => ({
-                    userId: s.user?._id || s.user,
-                    name: s.user?.name || "Member",
-                    email: s.user?.email,
-                    amount: s.amount,
-                    status: s.status,
-                    approvedAt: s.approvedAt,
-                    paidAt: s.paidAt
-                })),
-                createdAt: populated.createdAt
-            }
+            expense: formatExpenseResponse(populated)
         });
 
     } catch (error) {
@@ -230,31 +294,7 @@ export const getExpenses = async (req, res) => {
             .populate("splits.user", "name email")
             .sort({ date: -1, createdAt: -1 });
 
-        const formatted = expenses.map(e => ({
-            id: e._id,
-            _id: e._id,
-            title: e.title,
-            category: e.category,
-            amount: e.amount,
-            currency: e.currency || "INR",
-            totalAmount: e.totalAmount || e.amount,
-            date: e.date,
-            description: e.description,
-            paidBy: e.paidBy?.name || "Member",
-            paidById: e.paidBy?._id,
-            group: e.group,
-            splitType: e.splitType || "none",
-            splits: (e.splits || []).map(s => ({
-                userId: s.user?._id || s.user,
-                name: s.user?.name || "Member",
-                email: s.user?.email,
-                amount: s.amount,
-                status: s.status,
-                approvedAt: s.approvedAt,
-                paidAt: s.paidAt
-            })),
-            createdAt: e.createdAt
-        }));
+        const formatted = expenses.map(formatExpenseResponse);
 
         return res.status(200).json({
             success: true,
@@ -296,31 +336,7 @@ export const getExpenseById = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            expense: {
-                id: expense._id,
-                _id: expense._id,
-                title: expense.title,
-                category: expense.category,
-                amount: expense.amount,
-                currency: expense.currency || "INR",
-                totalAmount: expense.totalAmount,
-                date: expense.date,
-                description: expense.description,
-                group: expense.group,
-                paidBy: expense.paidBy?.name || "Member",
-                paidById: expense.paidBy?._id,
-                splitType: expense.splitType,
-                splits: (expense.splits || []).map(s => ({
-                    userId: s.user?._id || s.user,
-                    name: s.user?.name || "Member",
-                    email: s.user?.email,
-                    amount: s.amount,
-                    status: s.status,
-                    approvedAt: s.approvedAt,
-                    paidAt: s.paidAt
-                })),
-                createdAt: expense.createdAt
-            }
+            expense: formatExpenseResponse(expense)
         });
 
     } catch (error) {
@@ -336,7 +352,7 @@ export const getExpenseById = async (req, res) => {
 export const updateExpense = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, amount, totalAmount, category, date, description } = req.body;
+        const { title, amount, totalAmount, category, date, description, splitType, splits } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return res.status(400).json({
@@ -346,38 +362,9 @@ export const updateExpense = async (req, res) => {
         }
 
         const expense = await Expense.findOne({
-    _id: id,
-    deletedAt: null
-});
-const group = expense.group
-    ? await Group.findById(expense.group)
-    : null;
-
-const isCreator = expense.paidBy.equals(req.user._id);
-const isAdmin = group
-    ? group.createdBy.equals(req.user._id)
-    : false;
-
-if (!isCreator && !isAdmin) {
-    return res.status(403).json({
-        success: false,
-        message: "You are not authorized to update this expense"
-    });
-}
-
-if (group?.status === "closed") {
-    return res.status(400).json({
-        success: false,
-        message: "Cannot edit expenses in a closed group"
-    });
-}
-
-if (expense.deletedAt) {
-    return res.status(404).json({
-        success: false,
-        message: "Expense not found"
-    });
-}
+            _id: id,
+            deletedAt: null
+        });
 
         if (!expense) {
             return res.status(404).json({
@@ -386,42 +373,135 @@ if (expense.deletedAt) {
             });
         }
 
-        // Prevent modifying amount if any split is already paid
-        const hasPaidSplit = expense.splits?.some(s => s.status === "paid");
-        if (hasPaidSplit && (amount !== undefined || totalAmount !== undefined)) {
-            return res.status(400).json({
+        const group = expense.group
+            ? await Group.findById(expense.group)
+            : null;
+
+        const isCreator = expense.paidBy.equals(req.user._id);
+        const isAdmin = group
+            ? group.createdBy.equals(req.user._id)
+            : false;
+
+        if (!isCreator && !isAdmin) {
+            return res.status(403).json({
                 success: false,
-                message: "Cannot modify expense amount because one or more member splits have already been paid"
+                message: "You are not authorized to update this expense"
             });
         }
 
-        if (title !== undefined) expense.title = title.trim();
-        if (category !== undefined) expense.category = category;
+        if (group?.status === "closed") {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot edit expenses in a closed group"
+            });
+        }
+
+        // Prevent modifying amount or splits if any split is already paid
+        const hasPaidSplit = expense.splits?.some((s) => s.status === "paid");
+        if (
+            hasPaidSplit &&
+            (amount !== undefined || totalAmount !== undefined || splitType !== undefined || splits !== undefined)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot modify expense amount or splits because one or more member splits have already been paid"
+            });
+        }
+
+        if (title !== undefined) {
+            if (!String(title).trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Expense title is required"
+                });
+            }
+            expense.title = String(title).trim();
+        }
+        if (category !== undefined && VALID_CATEGORIES.includes(category)) {
+            expense.category = category;
+        }
         if (amount !== undefined || totalAmount !== undefined) {
             const newAmt = Number(amount ?? totalAmount);
-            if (!isNaN(newAmt) && newAmt > 0) {
-                expense.amount = newAmt;
-                expense.totalAmount = newAmt;
+            if (!Number.isFinite(newAmt) || newAmt <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "A valid positive expense amount is required"
+                });
             }
+            expense.amount = Number(newAmt.toFixed(2));
+            expense.totalAmount = Number(newAmt.toFixed(2));
         }
         if (date !== undefined) expense.date = date;
-        if (description !== undefined) expense.description = description.trim();
+        if (description !== undefined) expense.description = String(description).trim();
+
+        // Update splits if requested, or recalculate equal splits if total amount changed without custom splits
+        if (splitType !== undefined || splits !== undefined) {
+            if (expense.group && group) {
+                const splitResult = resolveExpenseSplits({
+                    group,
+                    expenseAmount: Number(expense.amount),
+                    splitType: splitType ?? expense.splitType,
+                    splits,
+                    currentUserId: req.user?._id
+                });
+                if (splitResult.error) {
+                    return res.status(400).json({
+                        success: false,
+                        message: splitResult.error
+                    });
+                }
+                expense.splitType = splitResult.splitType;
+                expense.splits = splitResult.splits;
+            } else if (splitType && splitType !== "none") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Please select a group to split an expense among members"
+                });
+            } else {
+                expense.splitType = "none";
+                expense.splits = [];
+            }
+        } else if (
+            (amount !== undefined || totalAmount !== undefined) &&
+            expense.group &&
+            group &&
+            expense.splitType === "equal"
+        ) {
+            const participantIds = (expense.splits?.length > 0
+                ? expense.splits.map((s) => s.user)
+                : group.members);
+            expense.splits = distributeEqualMemberSplits(
+                participantIds,
+                Number(expense.amount),
+                req.user?._id
+            );
+        } else if (
+            (amount !== undefined || totalAmount !== undefined) &&
+            expense.splitType === "custom" &&
+            expense.splits?.length > 0
+        ) {
+            const existingSum = expense.splits.reduce(
+                (sum, s) => sum + Number(s.amount || 0),
+                0
+            );
+            if (Math.abs(existingSum - Number(expense.amount)) > 0.01) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Custom split shares ($${existingSum.toFixed(2)}) must be updated to equal the new total ($${Number(expense.amount).toFixed(2)})`
+                });
+            }
+        }
 
         await expense.save();
+
+        const populated = await Expense.findById(expense._id)
+            .populate("paidBy", "name email")
+            .populate("splits.user", "name email");
 
         return res.status(200).json({
             success: true,
             message: "Expense updated successfully",
-            expense: {
-                id: expense._id,
-                _id: expense._id,
-                title: expense.title,
-                category: expense.category,
-                amount: expense.amount,
-                currency: expense.currency || "INR",
-                date: expense.date,
-                description: expense.description
-            }
+            expense: formatExpenseResponse(populated)
         });
 
     } catch (error) {

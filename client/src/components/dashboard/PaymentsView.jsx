@@ -12,18 +12,17 @@ import {
   ExternalLink,
   Users
 } from 'lucide-react';
-
-const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
+import { formatUSD } from '../../utils/currency';
 
 export default function PaymentsView({
   activeGroup,
   contributions = [],
-  poolData = { totalPool: 0, targetAmount: 200, remaining: 200 },
+  poolData = { totalPool: 0, targetAmount: 0, remaining: 0 },
   onPayNow,
   paymentLoading,
   paymentCompleted,
   myPaymentStatus,
-  userShare = 55.35,
+  userShare = 0,
   currentUserId,
 }) {
   const [customAmount, setCustomAmount] = useState(userShare);
@@ -119,7 +118,7 @@ export default function PaymentsView({
                   <div>
                     <span className="text-xs text-[#7E8B99] block">Allocated Equal Split</span>
                     <strong className="text-2xl font-bold text-[#F3F6F6] font-mono">
-                      {formatMoney(userShare)}
+                      {formatUSD(userShare)} USD
                     </strong>
                   </div>
                   <span className="text-xs text-[#c49cff] bg-[#a66bff]/10 px-3 py-1.5 rounded-xl border border-[#a66bff]/20 font-medium">
@@ -169,7 +168,7 @@ export default function PaymentsView({
                 <>
                   <CreditCard className="w-5 h-5" />
                   <span>
-                    Pay {formatMoney(useCustom ? customAmount : userShare)} with PayPal Sandbox
+                    Pay {formatUSD(useCustom ? customAmount : userShare)} USD with PayPal Sandbox
                   </span>
                   <ExternalLink className="w-4 h-4 ml-1 opacity-70" />
                 </>
@@ -193,7 +192,7 @@ export default function PaymentsView({
                 </h3>
               </div>
               <span className="text-xs text-[#7E8B99] font-mono">
-                Goal: {formatMoney(poolData.targetAmount)}
+                Goal: {formatUSD(poolData.targetAmount)} USD
               </span>
             </div>
 
@@ -226,7 +225,7 @@ export default function PaymentsView({
 
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-bold font-mono text-[#F3F6F6]">
-                        {formatMoney(c.amount)}
+                        {formatUSD(c.amount)}
                       </span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         isPaid
@@ -254,10 +253,10 @@ export default function PaymentsView({
             <div className="flex items-baseline justify-between">
               <div>
                 <span className="text-3xl font-extrabold text-[#F3F6F6] font-mono">
-                  {formatMoney(poolData.totalPool)}
+                  {formatUSD(poolData.totalPool)}
                 </span>
                 <span className="text-xs text-[#7E8B99] block mt-0.5">
-                  of {formatMoney(poolData.targetAmount)} target
+                  of {formatUSD(poolData.targetAmount)} USD target
                 </span>
               </div>
               <div className="text-2xl font-bold text-[#a66bff]">
@@ -274,7 +273,7 @@ export default function PaymentsView({
 
             <div className="flex items-center justify-between text-xs text-[#7E8B99] pt-2 border-t border-white/5">
               <span>Remaining to goal:</span>
-              <strong className="text-[#F3F6F6] font-mono">{formatMoney(poolData.remaining)}</strong>
+              <strong className="text-[#F3F6F6] font-mono">{formatUSD(poolData.remaining)} USD</strong>
             </div>
           </div>
 

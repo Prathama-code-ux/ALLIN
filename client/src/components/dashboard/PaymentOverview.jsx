@@ -1,17 +1,16 @@
 import React from 'react';
 import StatCard from './StatCard';
 import { ShieldCheck, ArrowUpRight, CheckCircle2, Clock, Sparkles } from 'lucide-react';
-
-const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
+import { formatUSD } from '../../utils/currency';
 
 export default function PaymentOverview({
   onPayNow,
   paymentLoading,
   paymentCompleted,
-  totalPool = 129.15,
-  targetAmount = 200.0,
+  totalPool = 0,
+  targetAmount = 0,
   totalExpenses = 0,
-  userShare = 55.35,
+  userShare = 0,
   myPaymentStatus = 'PENDING',
   nextPendingSplit = null,
   onApproveSplit,
@@ -85,16 +84,16 @@ export default function PaymentOverview({
             ) : isPaid ? (
               <>
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Share Paid ({formatMoney(userShare)})</span>
+                <span>Share Paid ({formatUSD(userShare)} USD)</span>
               </>
             ) : hasSplitToApprove ? (
               <>
                 <Clock className="w-4 h-4 text-white" />
-                <span>Review & Approve Split ({formatMoney(nextPendingSplit.amount)})</span>
+                <span>Review & Approve Split ({formatUSD(nextPendingSplit.amount)} USD)</span>
               </>
             ) : (
               <>
-                <span>Pay Your Share ({formatMoney(userShare)})</span>
+                <span>Pay Your Share ({formatUSD(userShare)} USD)</span>
                 <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-white/20 text-white">
                   Sandbox
                 </span>
@@ -114,10 +113,10 @@ export default function PaymentOverview({
             </span>
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl sm:text-3xl font-extrabold text-[#F3F6F6] font-['Plus_Jakarta_Sans']">
-                {formatMoney(totalPool)}
+                {formatUSD(totalPool)}
               </span>
               <span className="text-xs sm:text-sm text-[#94A3B8]">
-                collected of {formatMoney(targetAmount)} target
+                USD collected of {formatUSD(targetAmount)} target
               </span>
             </div>
           </div>
@@ -137,7 +136,7 @@ export default function PaymentOverview({
         </div>
 
         <div className="flex items-center justify-between text-xs text-[#94A3B8] pt-1">
-          <span>{formatMoney(remaining)} remaining to goal</span>
+          <span>{formatUSD(remaining)} USD remaining to goal</span>
           <span className="font-semibold text-[#F3F6F6]">
             {percentage >= 100 ? '🎉 Collection Goal Reached!' : 'Collection in progress'}
           </span>
@@ -148,7 +147,7 @@ export default function PaymentOverview({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         <StatCard
           label="Total Pool Collected"
-          amount={formatMoney(totalPool)}
+          amount={formatUSD(totalPool)}
           description={`${percentage}% of crew goal reached`}
           icon="♧"
           accent
@@ -156,21 +155,21 @@ export default function PaymentOverview({
 
         <StatCard
           label="Target Pool Goal"
-          amount={formatMoney(targetAmount)}
-          description="Total group target"
+          amount={formatUSD(targetAmount)}
+          description="Total group target (USD)"
           icon="◎"
         />
 
         <StatCard
           label="Total Group Expenses"
-          amount={formatMoney(totalExpenses)}
+          amount={formatUSD(totalExpenses)}
           description="Tracked group expenditures"
           icon="◈"
         />
 
         <StatCard
           label="Your Allocated Share"
-          amount={formatMoney(userShare)}
+          amount={formatUSD(userShare)}
           description={isPaid ? 'Payment verified' : 'Pending payment'}
           icon="⇄"
           badge={isPaid ? 'PAID' : 'PENDING'}

@@ -36,8 +36,8 @@ export default function DashboardPage() {
   const [contributions, setContributions] = useState([]);
   const [poolData, setPoolData] = useState({
     totalPool: 0,
-    targetAmount: 200,
-    remaining: 200,
+    targetAmount: 0,
+    remaining: 0,
   });
 
   // Expenses State (Loaded from MongoDB)
@@ -96,9 +96,9 @@ export default function DashboardPage() {
       if (data.success) {
         setContributions(data.contributions || []);
         setPoolData({
-          totalPool: data.totalPool || 0,
-          targetAmount: data.targetAmount || 200,
-          remaining: data.remaining || 0,
+          totalPool: Number(data.totalPool ?? 0),
+          targetAmount: Number(data.targetAmount ?? 0),
+          remaining: Number(data.remaining ?? 0),
         });
       }
     } catch (err) {
@@ -315,7 +315,7 @@ export default function DashboardPage() {
       const result = await expenseService.createExpense({
         ...expenseData,
         groupId,
-        currency: "INR",
+        currency: "USD",
       });
 
       // Switch to the selected crew, if applicable.
@@ -324,15 +324,18 @@ export default function DashboardPage() {
           (group) => String(group._id || group.id) === String(groupId),
         );
 
-        if (selectedGroup) {
+        const isSameActiveGroup =
+          activeGroup &&
+          String(activeGroup._id || activeGroup.id) === String(groupId);
+
+        if (selectedGroup && !isSameActiveGroup) {
           setActiveGroup(selectedGroup);
+        } else {
           await Promise.all([
             loadGroupContributions(groupId),
             loadExpenses(groupId),
             loadTransactions(groupId),
           ]);
-        } else {
-          await loadExpenses(groupId);
         }
       } else {
         // Personal expense: no crew association.
@@ -341,8 +344,8 @@ export default function DashboardPage() {
         setTransactions([]);
         setPoolData({
           totalPool: 0,
-          targetAmount: 200,
-          remaining: 200,
+          targetAmount: 0,
+          remaining: 0,
         });
 
         await Promise.all([loadExpenses(null), loadTransactions(null)]);
@@ -376,10 +379,10 @@ export default function DashboardPage() {
       setSavingPendingExpense(true);
       setPendingExpenseError("");
 
-      const res = await expenseService.createExpense({
+      await expenseService.createExpense({
         ...pendingExpense,
         groupId,
-        currency: "INR",
+        currency: "USD",
       });
 
       // Make the newly created group active.
@@ -436,11 +439,17 @@ export default function DashboardPage() {
     setExpenses((prev) =>
       prev.map((e) => ((e.id || e._id) === id ? res.expense : e)),
     );
+    if (activeGroup?._id) {
+      await loadGroupContributions(activeGroup._id);
+    }
   };
 
   const handleDeleteExpense = async (id) => {
     await expenseService.deleteExpense(id);
     setExpenses((prev) => prev.filter((e) => (e.id || e._id) !== id));
+    if (activeGroup?._id) {
+      await loadGroupContributions(activeGroup._id);
+    }
   };
 
   const handleCloseGroup = async (groupId) => {
@@ -508,7 +517,7 @@ export default function DashboardPage() {
     currentUserContribution?.pendingAmount !== undefined &&
     currentUserContribution?.pendingAmount > 0
       ? currentUserContribution.pendingAmount
-      : currentUserContribution?.amount || 55.35;
+      : (currentUserContribution?.amount ?? 0);
 
   const totalExpenseSum = expenses.reduce(
     (sum, e) => sum + Number(e.amount || 0),

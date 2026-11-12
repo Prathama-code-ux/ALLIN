@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { History, Search, ArrowDownLeft, CheckCircle2, Clock, XCircle } from 'lucide-react';
-
-const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
+import { formatUSD } from '../../utils/currency';
 
 export default function Transactions({ transactions = [], paymentCompleted }) {
   const [search, setSearch] = useState('');
@@ -101,7 +100,7 @@ export default function Transactions({ transactions = [], paymentCompleted }) {
 
                   <div className="text-right shrink-0">
                     <div className="text-xs sm:text-sm font-bold text-emerald-400">
-                      +{formatMoney(txn.amount)}
+                      +{formatUSD(txn.amount)} USD
                     </div>
                     <span
                       className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${

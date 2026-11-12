@@ -9,6 +9,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import groupService from "../../services/groupService";
+import { formatUSD, validatePositiveAmount } from "../../utils/currency";
 
 export default function GroupsView({
   groups = [],
@@ -31,7 +32,7 @@ export default function GroupsView({
   const [createForm, setCreateForm] = useState({
     name: "",
     description: "",
-    targetAmount: "200",
+    targetAmount: "",
   });
 
   const [joinCode, setJoinCode] = useState("");
@@ -122,6 +123,15 @@ export default function GroupsView({
       return;
     }
 
+    const targetCheck = validatePositiveAmount(
+      createForm.targetAmount,
+      "Target pool amount",
+    );
+    if (!targetCheck.valid) {
+      setError(targetCheck.error);
+      return;
+    }
+
     setSubmitting(true);
     setError("");
     setSuccess("");
@@ -130,7 +140,7 @@ export default function GroupsView({
       const res = await groupService.createGroup({
         name: createForm.name.trim(),
         description: createForm.description.trim(),
-        targetAmount: Number(createForm.targetAmount) || 200,
+        targetAmount: targetCheck.value,
       });
 
       setSuccess(
@@ -140,7 +150,7 @@ export default function GroupsView({
       setCreateForm({
         name: "",
         description: "",
-        targetAmount: "200",
+        targetAmount: "",
       });
 
       if (onGroupUpdated) {
@@ -325,18 +335,19 @@ export default function GroupsView({
 
             <div>
               <label className="block text-xs font-semibold text-[#94A3B8] mb-1.5">
-                Target Pool Amount (INR)
+                Target Pool Amount (USD) *
               </label>
 
               <div className="relative">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-[#7E8B99]">
-                  ₹
+                  $
                 </span>
 
                 <input
                   type="number"
                   step="0.01"
-                  min="1"
+                  min="0.01"
+                  required
                   value={createForm.targetAmount}
                   onChange={(e) =>
                     setCreateForm({
@@ -344,7 +355,7 @@ export default function GroupsView({
                       targetAmount: e.target.value,
                     })
                   }
-                  placeholder="200.00"
+                  placeholder="e.g. 250.00"
                   className="w-full pl-8 pr-4 py-2.5 rounded-xl bg-[#090810] border border-white/10 focus:border-[#a66bff] text-sm text-[#F3F6F6] focus:outline-none transition-colors"
                 />
               </div>
@@ -453,7 +464,7 @@ export default function GroupsView({
           {groups.map((group) => {
             const isSelected = activeGroup?._id === group._id;
             const memberCount = group.members?.length || 1;
-            const target = group.targetAmount || 200;
+            const target = group.targetAmount ?? 0;
 
             const groupCreatorId =
               typeof group.createdBy === "object"
@@ -521,7 +532,7 @@ export default function GroupsView({
                     </div>
 
                     <span className="text-sm font-bold text-[#F3F6F6] font-mono">
-                      ₹{Number(target).toFixed(2)}
+                      {formatUSD(target)} USD
                     </span>
                   </div>
 

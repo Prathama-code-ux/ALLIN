@@ -1,7 +1,6 @@
 import React from "react";
 import { Users, CheckCircle2, Clock, ArrowRight, Shield } from "lucide-react";
-
-const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
+import { formatUSD } from "../../utils/currency";
 
 export default function Contributions({
   contributions = [],
@@ -122,7 +121,7 @@ export default function Contributions({
 
                     <div className="text-right">
                       <div className="text-sm font-bold text-[#F3F6F6]">
-                        {formatMoney(member.amount)}
+                        {formatUSD(member.amount)}
                       </div>
                       <span
                         className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
@@ -154,7 +153,7 @@ export default function Contributions({
                                 {s.expenseTitle || "Shared Expense"}
                               </span>
                               <span className="font-bold text-[#F3F6F6]">
-                                {formatMoney(s.amount)}
+                                {formatUSD(s.amount)}
                               </span>
                             </div>
 
@@ -190,7 +189,7 @@ export default function Contributions({
                                     disabled={paymentLoading}
                                     className="px-3 py-1 rounded-lg text-[11px] font-bold text-white bg-gradient-to-r from-[#a66bff] to-[#8b43f6] hover:brightness-110 shadow-sm transition-all cursor-pointer flex items-center gap-1"
                                   >
-                                    <span>Pay ({formatMoney(s.amount)})</span>
+                                    <span>Pay ({formatUSD(s.amount)} USD)</span>
                                     <span className="text-[9px] uppercase opacity-75">
                                       Sandbox
                                     </span>

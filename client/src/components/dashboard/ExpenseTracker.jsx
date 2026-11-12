@@ -1,9 +1,32 @@
-import React, { useState, useEffect } from "react";
-import StatCard from "./StatCard";
-import { Plus, Edit2, Trash2, Search, X } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Search,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Users,
+  ScanLine,
+  PieChart,
+  AlertCircle,
+  CheckCircle2,
+  Lock,
+} from "lucide-react";
 import { parsePaymentQR } from "../../utils/parsePaymentQR";
+import { formatUSD, validatePositiveAmount } from "../../utils/currency";
+import {
+  CATEGORY_ICONS,
+  getMemberId,
+  calculateEqualSplits,
+  calculatePercentageSplits,
+  validateFixedSplits,
+  buildEvenPercentages,
+  computeSpendingStats,
+} from "../../utils/expenseSplits";
 
-const expenseCategories = [
+const EXPENSE_CATEGORIES = [
   "Food",
   "Transport",
   "Shopping",
@@ -14,41 +37,72 @@ const expenseCategories = [
   "Other",
 ];
 
-const categoryIcons = {
-  Food: "🍔",
-  Transport: "🚕",
-  Shopping: "🛍",
-  Entertainment: "🎬",
-  Bills: "📄",
-  Health: "💊",
-  Travel: "✈️",
-  Other: "📦",
-};
-
-const formatMoney = (amount) => `$${Number(amount || 0).toFixed(2)}`;
+const SPLIT_MODES = [
+  { id: "none", label: "No Split" },
+  { id: "equal", label: "Equal" },
+  { id: "percentage", label: "Percentage (%)" },
+  { id: "fixed", label: "Fixed ($)" },
+];
 
 const formatDate = (date) => {
   if (!date) return "—";
   try {
-    const d = new Date(date.includes("T") ? date : `${date}T00:00:00`);
+    const str = String(date);
+    const d = new Date(str.includes("T") ? str : `${str}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return str;
     return d.toLocaleDateString("en-US", {
       month: "short",
       day: "2-digit",
       year: "numeric",
     });
   } catch {
-    return date;
+    return String(date);
   }
 };
 
-const emptyForm = {
+const getMemberLabel = (member) => {
+  if (!member) return "Group Member";
+  if (typeof member === "string") return `Member (${member.slice(-4)})`;
+  return member.name || member.email || `Member (${getMemberId(member).slice(-4)})`;
+};
+
+const summarizeExpensePaymentStatus = (splits = []) => {
+  if (!Array.isArray(splits) || splits.length === 0) {
+    return null;
+  }
+
+  const paidCount = splits.filter(
+    (s) => String(s.status || "").toLowerCase() === "paid",
+  ).length;
+  const approvedCount = splits.filter(
+    (s) => String(s.status || "").toLowerCase() === "approved",
+  ).length;
+
+  if (paidCount === splits.length) {
+    return { label: "Paid", tone: "paid" };
+  }
+  if (paidCount > 0) {
+    return { label: `Partial (${paidCount}/${splits.length} paid)`, tone: "partial" };
+  }
+  if (approvedCount === splits.length) {
+    return { label: "Ready to Pay", tone: "approved" };
+  }
+  if (approvedCount > 0) {
+    return { label: `Approved (${approvedCount}/${splits.length})`, tone: "approved" };
+  }
+  return { label: "Pending Approval", tone: "pending" };
+};
+
+const getTodayISO = () => new Date().toISOString().split("T")[0];
+
+const getEmptyForm = (defaultGroupId = "") => ({
   title: "",
   category: "Food",
   amount: "",
-  date: new Date().toISOString().split("T")[0],
+  date: getTodayISO(),
   description: "",
-  groupId: "",
-};
+  groupId: defaultGroupId,
+});
 
 export default function ExpenseTracker({
   expenses = [],
@@ -64,253 +118,614 @@ export default function ExpenseTracker({
 }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [formData, setFormData] = useState(emptyForm);
+  const [editingHasPaidSplit, setEditingHasPaidSplit] = useState(false);
+  const [formData, setFormData] = useState(() => getEmptyForm(""));
+  const [qrDetails, setQrDetails] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
 
-  const [qrDetails, setQrDetails] = useState("");
+  // Split allocation state
+  const [splitMode, setSplitMode] = useState("none"); // 'none' | 'equal' | 'percentage' | 'fixed'
+  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
+  const [percentagesByMember, setPercentagesByMember] = useState({});
+  const [fixedAmountsByMember, setFixedAmountsByMember] = useState({});
 
+  // History filters & expanded rows
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterCategory, setFilterCategory] = useState("All");
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+
+  const openGroups = useMemo(
+    () =>
+      groups.filter(
+        (group) => group.status !== "closed" && !group.deletedAt,
+      ),
+    [groups],
+  );
+
+  const defaultOpenGroupId = useMemo(() => {
+    const activeId = getMemberId(activeGroup);
+    if (
+      activeId &&
+      openGroups.some((g) => getMemberId(g) === activeId)
+    ) {
+      return activeId;
+    }
+    return "";
+  }, [activeGroup, openGroups]);
+
+  const selectedGroup = useMemo(() => {
+    if (!formData.groupId) return null;
+    return (
+      groups.find((g) => getMemberId(g) === String(formData.groupId)) || null
+    );
+  }, [groups, formData.groupId]);
+
+  const groupMembers = useMemo(
+    () => (Array.isArray(selectedGroup?.members) ? selectedGroup.members : []),
+    [selectedGroup],
+  );
+
+  const initializeSplitStateForGroup = (groupObj, preferredMode = "equal") => {
+    if (!groupObj || !Array.isArray(groupObj.members) || groupObj.members.length === 0) {
+      setSplitMode("none");
+      setSelectedMemberIds([]);
+      setPercentagesByMember({});
+      setFixedAmountsByMember({});
+      return;
+    }
+
+    const memberIds = groupObj.members.map(getMemberId).filter(Boolean);
+    setSelectedMemberIds(memberIds);
+    setSplitMode(preferredMode);
+    setPercentagesByMember(buildEvenPercentages(memberIds));
+    setFixedAmountsByMember({});
+  };
+
+  // Autofill form from scanned QR payment payload
   useEffect(() => {
     if (!scannedQRData) return;
 
     const parsed = parsePaymentQR(scannedQRData);
+    setQrDetails(parsed);
 
-    setQrDetails(scannedQRData);
+    const descriptionParts = [];
+    if (parsed.upiId) descriptionParts.push(`Payee ID: ${parsed.upiId}`);
+    if (parsed.note) descriptionParts.push(`Note: ${parsed.note}`);
 
-    setFormData((prev) => ({
-      ...prev,
-      title: parsed.merchantName
-        ? `Payment to ${parsed.merchantName}`
-        : prev.title,
-      amount: parsed.amount || "",
-      description: [
-        parsed.upiId ? `UPI ID: ${parsed.upiId}` : "",
-        parsed.note ? `Note: ${parsed.note}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    }));
-
-    setEditingId(null);
-    setShowForm(true);
-
-    onQRDataHandled?.();
-  }, [scannedQRData, onQRDataHandled]);
-
-  const totalExpenses = expenses.reduce(
-    (total, exp) => total + Number(exp.amount || 0),
-    0,
-  );
-
-  const categoryTotals = expenseCategories
-    .map((category) => ({
-      name: category,
-      amount: expenses
-        .filter((e) => e.category === category)
-        .reduce((sum, e) => sum + Number(e.amount || 0), 0),
-    }))
-    .filter((c) => c.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
-
-  const filteredExpenses = expenses
-    .filter((expense) => {
-      const q = search.toLowerCase();
-      const matchesSearch =
-        (expense.title && expense.title.toLowerCase().includes(q)) ||
-        (expense.description && expense.description.toLowerCase().includes(q));
-
-      const matchesCategory =
-        selectedCategory === "All" || expense.category === selectedCategory;
-
-      return matchesSearch && matchesCategory;
-    })
-    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-
-  const openAddForm = () => {
-    setEditingId(null);
-
+    const grp = openGroups.find((g) => getMemberId(g) === defaultOpenGroupId);
     setFormData({
-      ...emptyForm,
-      date: new Date().toISOString().split("T")[0],
-      groupId: activeGroup?._id || activeGroup?.id || "",
+      title: parsed.merchantName || "Scanned QR Expense",
+      category: "Other",
+      amount: parsed.amount || "",
+      date: getTodayISO(),
+      description: descriptionParts.join(" | "),
+      groupId: defaultOpenGroupId,
     });
 
+    initializeSplitStateForGroup(
+      grp,
+      grp && grp.members?.length > 0 ? "equal" : "none",
+    );
+
+    setEditingId(null);
+    setEditingHasPaidSplit(false);
+    setFormError("");
+    setShowForm(true);
+    onQRDataHandled?.();
+  }, [scannedQRData, onQRDataHandled, defaultOpenGroupId, openGroups]);
+
+  const openAddForm = () => {
+    const grp = openGroups.find((g) => getMemberId(g) === defaultOpenGroupId);
+    setEditingId(null);
+    setEditingHasPaidSplit(false);
+    setQrDetails(null);
+    setFormData(getEmptyForm(defaultOpenGroupId));
+    initializeSplitStateForGroup(
+      grp,
+      grp && grp.members?.length > 0 ? "equal" : "none",
+    );
+    setFormError("");
     setShowForm(true);
   };
 
   const openEditForm = (expense) => {
+    const expenseGroupId =
+      typeof expense.group === "object"
+        ? getMemberId(expense.group)
+        : String(expense.group || "");
+    const targetGroup =
+      groups.find((g) => getMemberId(g) === expenseGroupId) || null;
+    const hasPaidSplit =
+      Array.isArray(expense.splits) &&
+      expense.splits.some(
+        (s) => String(s.status || "").toLowerCase() === "paid",
+      );
+
     setEditingId(expense.id || expense._id);
+    setEditingHasPaidSplit(hasPaidSplit);
+    setQrDetails(null);
     setFormData({
-      title: expense.title,
-      category: expense.category,
-      amount: String(expense.amount),
-      date: expense.date
-        ? expense.date.split("T")[0]
-        : new Date().toISOString().split("T")[0],
+      title: expense.title || "",
+      category: expense.category || "Food",
+      amount: String(expense.amount ?? ""),
+      date: expense.date || getTodayISO(),
       description: expense.description || "",
+      groupId: expenseGroupId,
     });
+
+    const existingSplits = Array.isArray(expense.splits) ? expense.splits : [];
+    if (expenseGroupId && existingSplits.length > 0) {
+      const ids = existingSplits
+        .map((s) => String(s.userId || s.user || ""))
+        .filter(Boolean);
+      const amtMap = {};
+      const pctMap = {};
+      const expTotal = Number(expense.amount || 0);
+
+      existingSplits.forEach((s) => {
+        const uid = String(s.userId || s.user || "");
+        if (!uid) return;
+        amtMap[uid] = Number(s.amount || 0).toFixed(2);
+        pctMap[uid] =
+          expTotal > 0
+            ? Number(((Number(s.amount || 0) / expTotal) * 100).toFixed(1))
+            : 0;
+      });
+
+      setSelectedMemberIds(ids);
+      setFixedAmountsByMember(amtMap);
+      setPercentagesByMember(
+        Object.keys(pctMap).length > 0 ? pctMap : buildEvenPercentages(ids),
+      );
+      setSplitMode(expense.splitType === "custom" ? "fixed" : "equal");
+    } else if (expenseGroupId && targetGroup?.members?.length > 0) {
+      const ids = targetGroup.members.map(getMemberId).filter(Boolean);
+      setSelectedMemberIds(ids);
+      setPercentagesByMember(buildEvenPercentages(ids));
+      setFixedAmountsByMember({});
+      setSplitMode(expense.splitType === "none" ? "none" : "equal");
+    } else {
+      setSelectedMemberIds([]);
+      setPercentagesByMember({});
+      setFixedAmountsByMember({});
+      setSplitMode("none");
+    }
+
+    setFormError("");
     setShowForm(true);
   };
 
-  const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  const handleGroupSelectionChange = (newGroupId) => {
+    setFormData((prev) => ({ ...prev, groupId: newGroupId }));
+    setFormError("");
+
+    const grp = openGroups.find((g) => getMemberId(g) === String(newGroupId));
+    initializeSplitStateForGroup(
+      grp,
+      grp && grp.members?.length > 0 ? "equal" : "none",
+    );
   };
+
+  const handleSplitModeChange = (nextMode) => {
+    setSplitMode(nextMode);
+    setFormError("");
+
+    if (nextMode === "percentage" && selectedMemberIds.length > 0) {
+      const hasAnyValue = selectedMemberIds.some(
+        (id) => Number(percentagesByMember[id] || 0) > 0,
+      );
+      if (!hasAnyValue) {
+        setPercentagesByMember(buildEvenPercentages(selectedMemberIds));
+      }
+    }
+
+    if (nextMode === "fixed" && selectedMemberIds.length > 0) {
+      const hasAnyFixed = selectedMemberIds.some(
+        (id) => Number(fixedAmountsByMember[id] || 0) > 0,
+      );
+      const amtNum = Number(formData.amount);
+      if (!hasAnyFixed && Number.isFinite(amtNum) && amtNum > 0) {
+        const equalRes = calculateEqualSplits(amtNum, selectedMemberIds);
+        if (equalRes.isValid) {
+          const initialFixed = {};
+          Object.entries(equalRes.sharesByMember).forEach(([id, val]) => {
+            initialFixed[id] = val.toFixed(2);
+          });
+          setFixedAmountsByMember(initialFixed);
+        }
+      }
+    }
+  };
+
+  const handleToggleMember = (memberId) => {
+    setFormError("");
+    setSelectedMemberIds((prev) => {
+      const exists = prev.includes(memberId);
+      const next = exists
+        ? prev.filter((id) => id !== memberId)
+        : [...prev, memberId];
+
+      if (splitMode === "percentage") {
+        setPercentagesByMember((prevPct) => {
+          const updated = { ...prevPct };
+          if (exists) {
+            delete updated[memberId];
+          } else {
+            return buildEvenPercentages(next);
+          }
+          return updated;
+        });
+      }
+      return next;
+    });
+  };
+
+  const handleDistributeEvenly = () => {
+    setFormError("");
+    if (selectedMemberIds.length === 0) return;
+
+    if (splitMode === "percentage") {
+      setPercentagesByMember(buildEvenPercentages(selectedMemberIds));
+    } else if (splitMode === "fixed") {
+      const amtNum = Number(formData.amount);
+      if (Number.isFinite(amtNum) && amtNum > 0) {
+        const eq = calculateEqualSplits(amtNum, selectedMemberIds);
+        if (eq.isValid) {
+          const nextFixed = {};
+          Object.entries(eq.sharesByMember).forEach(([id, val]) => {
+            nextFixed[id] = val.toFixed(2);
+          });
+          setFixedAmountsByMember(nextFixed);
+        }
+      }
+    }
+  };
+
+  // Live split evaluation
+  const splitEvaluation = useMemo(() => {
+    if (!formData.groupId || splitMode === "none" || editingHasPaidSplit) {
+      return {
+        isValid: true,
+        apiSplitType: "none",
+        splits: [],
+        sharesByMember: {},
+        error: "",
+      };
+    }
+
+    const totalNum = Number(formData.amount);
+
+    if (splitMode === "equal") {
+      const res = calculateEqualSplits(totalNum, selectedMemberIds);
+      return {
+        ...res,
+        apiSplitType: "equal",
+      };
+    }
+
+    if (splitMode === "percentage") {
+      const res = calculatePercentageSplits(
+        totalNum,
+        percentagesByMember,
+        selectedMemberIds,
+      );
+      return {
+        ...res,
+        apiSplitType: "custom",
+      };
+    }
+
+    const res = validateFixedSplits(
+      totalNum,
+      fixedAmountsByMember,
+      selectedMemberIds,
+    );
+    return {
+      ...res,
+      apiSplitType: "custom",
+    };
+  }, [
+    formData.groupId,
+    formData.amount,
+    splitMode,
+    editingHasPaidSplit,
+    selectedMemberIds,
+    percentagesByMember,
+    fixedAmountsByMember,
+  ]);
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
-
-    const amount = Number(formData.amount);
+    setFormError("");
 
     if (!formData.title.trim()) {
-      alert("Please enter an expense title.");
+      setFormError("Please enter an expense title.");
       return;
     }
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      alert("Please enter a valid expense amount.");
+    const amountCheck = validatePositiveAmount(formData.amount, "Amount");
+    if (!amountCheck.valid && !editingHasPaidSplit) {
+      setFormError(amountCheck.error);
       return;
+    }
+
+    if (formData.groupId && splitMode !== "none" && !editingHasPaidSplit) {
+      if (!splitEvaluation.isValid) {
+        setFormError(
+          splitEvaluation.error || "Please resolve invalid split allocations.",
+        );
+        return;
+      }
     }
 
     setSubmitting(true);
 
     try {
-      const payload = {
+      const basePayload = {
         title: formData.title.trim(),
         category: formData.category,
-        amount,
         date: formData.date,
         description: formData.description.trim(),
       };
 
       if (editingId !== null) {
-        await onUpdateExpense(editingId, payload);
+        const updatePayload = editingHasPaidSplit
+          ? basePayload
+          : {
+              ...basePayload,
+              amount: amountCheck.value,
+              ...(formData.groupId
+                ? {
+                    splitType: splitEvaluation.apiSplitType,
+                    splits:
+                      splitMode === "none" ? [] : splitEvaluation.splits,
+                  }
+                : {}),
+            };
+        await onUpdateExpense(editingId, updatePayload);
       } else {
-        await onAddExpense({
-          ...payload,
+        const createPayload = {
+          ...basePayload,
+          amount: amountCheck.value,
           groupId: formData.groupId || null,
-        });
+          ...(formData.groupId
+            ? {
+                splitType: splitEvaluation.apiSplitType,
+                splits:
+                  splitMode === "none" ? [] : splitEvaluation.splits,
+              }
+            : { splitType: "none", splits: [] }),
+        };
+        await onAddExpense(createPayload);
       }
 
       setShowForm(false);
       setEditingId(null);
-      setFormData(emptyForm);
-      setQrDetails("");
+      setEditingHasPaidSplit(false);
+      setFormData(getEmptyForm(defaultOpenGroupId));
+      setQrDetails(null);
     } catch (err) {
-      alert(err.message || "Failed to save expense");
+      setFormError(
+        err.response?.data?.message ||
+          err.message ||
+          "Could not save expense.",
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDelete = async (id, title) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the expense "${title}"?`,
-    );
-    if (!confirmed) return;
-
+  const handleDelete = async (id, event) => {
+    event?.stopPropagation();
     try {
       await onDeleteExpense(id);
     } catch (err) {
-      alert(err.message || "Failed to delete expense");
+      console.error("Failed to delete expense:", err);
+      window.alert(
+        err.response?.data?.message ||
+          err.message ||
+          "Unable to delete expense.",
+      );
     }
   };
 
-  const maxCategoryAmount = Math.max(...categoryTotals.map((c) => c.amount), 1);
+  const toggleExpand = (id) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Spending analytics (strictly computed from real backend expense data)
+  const spendingStats = useMemo(
+    () => computeSpendingStats(expenses),
+    [expenses],
+  );
+
+  // Filtered history list (search by title or description + category)
+  const filteredExpenses = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return expenses.filter((exp) => {
+      const matchesSearch =
+        !query ||
+        String(exp.title || "").toLowerCase().includes(query) ||
+        String(exp.description || "").toLowerCase().includes(query);
+      const matchesCategory =
+        filterCategory === "All" || exp.category === filterCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [expenses, searchQuery, filterCategory]);
+
+  const filteredTotal = useMemo(
+    () =>
+      filteredExpenses.reduce(
+        (sum, exp) => sum + Number(exp.amount || 0),
+        0,
+      ),
+    [filteredExpenses],
+  );
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setFilterCategory("All");
+  };
 
   return (
-    <section className="expense-page">
-      <div className="section-heading expense-heading">
+    <div className="expense-page">
+      {/* Header Banner */}
+      <div className="panel expense-hero-panel">
         <div>
-          <span className="eyebrow">MONEY MANAGEMENT</span>
-          <h1>Expense Tracker</h1>
-          <p>
-            Persist, categorize, and track shared crew expenses in MongoDB
-            Atlas.
+          <span className="eyebrow">EXPENSE MANAGEMENT</span>
+          <h2>Expense Tracker & Splits</h2>
+          <p className="muted">
+            Record expenses in USD, divide costs with crew members, and analyze
+            spending by category.
           </p>
         </div>
 
-        <button
-          type="button"
-          className="add-expense-button flex items-center gap-2"
-          onClick={openAddForm}
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Expense</span>
-        </button>
-      </div>
-
-      {/* Expense Statistics */}
-      <div className="stats-grid expense-stats">
-        <StatCard
-          label="TOTAL EXPENSES"
-          amount={formatMoney(totalExpenses)}
-          description={`${expenses.length} recorded expenses`}
-          icon="↘"
-          accent
-        />
-
-        <StatCard
-          label="AVERAGE EXPENSE"
-          amount={formatMoney(
-            expenses.length ? totalExpenses / expenses.length : 0,
+        <div className="expense-hero-actions">
+          {onOpenQRScanner && (
+            <button
+              type="button"
+              className="scan-qr-button"
+              onClick={onOpenQRScanner}
+            >
+              <ScanLine className="w-4 h-4" />
+              <span>Scan Bill / QR</span>
+            </button>
           )}
-          description="Average per recorded expense"
-          icon="◈"
-        />
-
-        <StatCard
-          label="CATEGORIES USED"
-          amount={String(categoryTotals.length)}
-          description="Distinct spending categories"
-          icon="🛍"
-        />
+          <button
+            type="button"
+            className="add-expense-button"
+            onClick={openAddForm}
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Expense</span>
+          </button>
+        </div>
       </div>
 
-      {/* Categories Breakdown */}
-      <div className="panel expense-categories-panel">
+      {/* Spending Analysis Panel */}
+      <section className="panel expense-categories-panel">
         <div className="panel-heading">
           <div>
             <span className="eyebrow">SPENDING ANALYSIS</span>
-            <h2>Expenses by Category</h2>
+            <h2>Category Breakdown & Insights</h2>
+            <p className="spending-subtitle">
+              Real-time USD spending breakdown across recorded expenses.
+            </p>
           </div>
-          <span className="member-count">BREAKDOWN</span>
+          {spendingStats.count > 0 && (
+            <span className="expense-count-pill">
+              <PieChart className="w-3.5 h-3.5" />
+              {spendingStats.categoriesBreakdown.length}{" "}
+              {spendingStats.categoriesBreakdown.length === 1
+                ? "Category"
+                : "Categories"}
+            </span>
+          )}
         </div>
 
-        {categoryTotals.length === 0 ? (
-          <p className="empty-expenses">
-            No expenses recorded yet. Click &quot;Add Expense&quot; to log your
-            first payment!
-          </p>
-        ) : (
-          <div className="categories-list">
-            {categoryTotals.map((cat) => (
-              <div key={cat.name} className="category-item">
-                <div className="category-meta">
-                  <span className="category-title">
-                    {categoryIcons[cat.name]} {cat.name}
-                  </span>
-                  <span className="category-amount">
-                    {formatMoney(cat.amount)}
-                  </span>
-                </div>
+        {/* 4 Summary Cards */}
+        <div className="spending-summary-grid">
+          <div className="spending-summary-card spending-total-card">
+            <span>TOTAL RECORDED EXPENSES</span>
+            <strong>{formatUSD(spendingStats.totalExpenses)}</strong>
+            <small>Total in USD</small>
+          </div>
 
-                <div className="category-bar">
-                  <div
-                    className="category-fill"
-                    style={{
-                      width: `${Math.round((cat.amount / maxCategoryAmount) * 100)}%`,
-                    }}
-                  />
+          <div className="spending-summary-card">
+            <span>NUMBER OF EXPENSES</span>
+            <strong>{spendingStats.count}</strong>
+            <small>
+              {spendingStats.count === 1
+                ? "1 recorded entry"
+                : `${spendingStats.count} recorded entries`}
+            </small>
+          </div>
+
+          <div className="spending-summary-card">
+            <span>HIGHEST-SPENDING CATEGORY</span>
+            <strong>
+              {spendingStats.topCategory
+                ? `${spendingStats.topCategory.icon} ${spendingStats.topCategory.name}`
+                : "None"}
+            </strong>
+            <small>
+              {spendingStats.topCategory
+                ? `${formatUSD(spendingStats.topCategory.amount)} spent`
+                : "No expenses recorded"}
+            </small>
+          </div>
+
+          <div className="spending-summary-card">
+            <span>TOP CATEGORY SHARE</span>
+            <strong>{spendingStats.topCategoryPercentage.toFixed(1)}%</strong>
+            <small>Of total recorded spending</small>
+          </div>
+        </div>
+
+        {spendingStats.categoriesBreakdown.length === 0 ? (
+          <div className="spending-empty">
+            <span className="spending-empty-icon">◈</span>
+            <h3>No Spending Data Yet</h3>
+            <p>
+              Add an expense above or scan a payment QR code to generate
+              category analytics.
+            </p>
+          </div>
+        ) : (
+          <div className="spending-category-list">
+            {spendingStats.categoriesBreakdown.map((cat) => {
+              const pct = Number(cat.percentage || 0);
+              return (
+                <div key={cat.name} className="spending-category-item">
+                  <div className="spending-category-top">
+                    <div className="spending-category-name">
+                      <span className="spending-category-icon">
+                        {cat.icon}
+                      </span>
+                      <div>
+                        <strong>{cat.name}</strong>
+                        <small>
+                          {cat.count}{" "}
+                          {cat.count === 1 ? "expense" : "expenses"}
+                        </small>
+                      </div>
+                    </div>
+
+                    <div className="spending-category-values">
+                      <span className="spending-category-amount">
+                        {formatUSD(cat.amount)} USD
+                      </span>
+                      <span className="spending-category-pct">
+                        {pct.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="spending-progress-track">
+                    <div
+                      className="spending-progress-fill"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, pct)).toFixed(2)}%`,
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Modal Form for Add/Edit Expense */}
+      {/* Add / Edit Expense Modal */}
       {showForm && (
         <div
           className="expense-modal-backdrop"
@@ -322,111 +737,124 @@ export default function ExpenseTracker({
           >
             <div className="expense-modal-header">
               <div>
+                <span className="eyebrow">
+                  {editingId !== null ? "EDIT EXPENSE" : "ADD NEW EXPENSE"}
+                </span>
                 <h3>
-                  {editingId !== null ? "Edit Expense" : "Add New Expense"}
+                  {editingId !== null ? "Update Expense" : "New Expense (USD)"}
                 </h3>
-                {editingId === null && (
-                  <p className="text-xs text-[#94A3B8] mt-1">
-                    Create an expense manually or scan a merchant QR.
-                  </p>
-                )}
               </div>
-
               <button
                 type="button"
                 className="close-modal-button"
                 onClick={() => setShowForm(false)}
-                aria-label="Close"
+                aria-label="Close modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {editingId === null && (
-              <div className="mb-4">
+            {editingId === null && onOpenQRScanner && (
+              <div className="expense-modal-qr-row">
                 <button
                   type="button"
-                  onClick={onOpenQRScanner}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-[#a66bff]/30 bg-[#a66bff]/10 text-[#c49cff] text-sm font-semibold hover:bg-[#a66bff]/20 transition"
+                  onClick={() => {
+                    setShowForm(false);
+                    onOpenQRScanner();
+                  }}
+                  className="expense-qr-trigger"
                 >
-                  <span>▦</span>
-                  Scan Bill / Merchant QR
+                  <ScanLine className="w-4 h-4" />
+                  <span>Scan Bill / Merchant QR</span>
                 </button>
               </div>
             )}
 
             {qrDetails && (
-              <div className="mb-4 p-4 rounded-xl bg-[#a66bff]/10 border border-[#a66bff]/25">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-xs font-bold text-[#c49cff]">
-                    QR INFORMATION DETECTED
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={() => setQrDetails("")}
-                    className="text-xs text-[#94A3B8] hover:text-white"
-                  >
-                    Clear
-                  </button>
-                </div>
-
-                <p className="text-xs text-[#F3F6F6] break-all whitespace-pre-wrap">
-                  {qrDetails}
+              <div className="expense-qr-banner">
+                <p className="expense-qr-banner-title">
+                  Autofilled from scanned QR
                 </p>
+                {qrDetails.merchantName && (
+                  <p className="expense-qr-banner-line">
+                    Merchant: <span>{qrDetails.merchantName}</span>
+                  </p>
+                )}
+                {qrDetails.upiId && (
+                  <p className="expense-qr-banner-line">
+                    Payee ID: <span>{qrDetails.upiId}</span>
+                  </p>
+                )}
+                {qrDetails.note && (
+                  <p className="expense-qr-banner-line">
+                    Note: <span>{qrDetails.note}</span>
+                  </p>
+                )}
+              </div>
+            )}
 
-                <p className="text-[11px] text-[#94A3B8] mt-2">
-                  Merchant information and available amount have been extracted.
-                  Please verify the details before saving. Scanning does not
-                  initiate a payment.
-                </p>
+            {editingHasPaidSplit && (
+              <div className="expense-lock-notice">
+                <Lock className="w-4 h-4 shrink-0" />
+                <span>
+                  Amount and splits are locked because one or more member
+                  shares have already been paid. You can still update title,
+                  category, date, and description.
+                </span>
+              </div>
+            )}
+
+            {formError && (
+              <div className="expense-form-error" role="alert">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{formError}</span>
               </div>
             )}
 
             <form onSubmit={handleFormSubmit} className="expense-form">
               <div className="form-group">
-                <label htmlFor="expense-title">Expense Title *</label>
+                <label htmlFor="expense-title">Title *</label>
                 <input
                   id="expense-title"
                   type="text"
-                  name="title"
-                  required
-                  placeholder="e.g. Dinner at restaurant"
+                  placeholder="e.g. Team dinner at Harbor Grill"
                   value={formData.title}
-                  onChange={handleFormChange}
+                  onChange={(e) =>
+                    setFormData({ ...formData, title: e.target.value })
+                  }
+                  required
                 />
               </div>
-              {editingId === null && (
-                <div className="form-group">
-                  <label htmlFor="expense-group">Add Expense To *</label>
 
+              {editingId === null ? (
+                <div className="form-group">
+                  <label htmlFor="expense-group">Group / Crew</label>
                   <select
                     id="expense-group"
-                    name="groupId"
                     value={formData.groupId}
-                    onChange={handleFormChange}
+                    onChange={(e) => handleGroupSelectionChange(e.target.value)}
                   >
-                    <option value="">Personal Expense</option>
-
-                    {groups
-                      .filter(
-                        (group) =>
-                          group.status !== "closed" && !group.deletedAt,
-                      )
-                      .map((group) => (
-                        <option
-                          key={group._id || group.id}
-                          value={group._id || group.id}
-                        >
-                          {group.name}
+                    <option value="">Personal Expense (No Group)</option>
+                    {openGroups.map((group) => {
+                      const gid = getMemberId(group);
+                      return (
+                        <option key={gid} value={gid}>
+                          {group.name} ({group.members?.length || 1} members)
                         </option>
-                      ))}
+                      );
+                    })}
                   </select>
-
-                  <p className="text-xs text-[#94A3B8] mt-1">
-                    Choose an existing crew or save this as a personal expense.
-                  </p>
                 </div>
+              ) : (
+                selectedGroup && (
+                  <div className="form-group">
+                    <label>Group / Crew</label>
+                    <div className="expense-readonly-field">
+                      <Users className="w-4 h-4 text-[#a66bff]" />
+                      <span>{selectedGroup.name}</span>
+                    </div>
+                  </div>
+                )
               )}
 
               <div className="form-row">
@@ -434,30 +862,33 @@ export default function ExpenseTracker({
                   <label htmlFor="expense-category">Category *</label>
                   <select
                     id="expense-category"
-                    name="category"
                     value={formData.category}
-                    onChange={handleFormChange}
+                    onChange={(e) =>
+                      setFormData({ ...formData, category: e.target.value })
+                    }
                   >
-                    {expenseCategories.map((c) => (
-                      <option key={c} value={c}>
-                        {categoryIcons[c]} {c}
+                    {EXPENSE_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {CATEGORY_ICONS[cat] || "📦"} {cat}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label htmlFor="expense-amount">Amount ($) *</label>
+                  <label htmlFor="expense-amount">Amount (USD $) *</label>
                   <input
                     id="expense-amount"
                     type="number"
-                    step="0.01"
                     min="0.01"
-                    name="amount"
-                    required
+                    step="0.01"
                     placeholder="0.00"
+                    disabled={editingHasPaidSplit}
                     value={formData.amount}
-                    onChange={handleFormChange}
+                    onChange={(e) =>
+                      setFormData({ ...formData, amount: e.target.value })
+                    }
+                    required
                   />
                 </div>
               </div>
@@ -467,44 +898,222 @@ export default function ExpenseTracker({
                 <input
                   id="expense-date"
                   type="date"
-                  name="date"
-                  required
                   value={formData.date}
-                  onChange={handleFormChange}
+                  onChange={(e) =>
+                    setFormData({ ...formData, date: e.target.value })
+                  }
+                  required
                 />
               </div>
 
               <div className="form-group">
-                <label htmlFor="expense-desc">Description (Optional)</label>
+                <label htmlFor="expense-description">Description</label>
                 <textarea
-                  id="expense-desc"
-                  name="description"
-                  rows={3}
-                  placeholder="Notes about this expense..."
+                  id="expense-description"
+                  rows="3"
+                  placeholder="Optional receipt notes or expense details..."
                   value={formData.description}
-                  onChange={handleFormChange}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
                 />
               </div>
+
+              {/* Group Member Splitting Controls */}
+              {formData.groupId && groupMembers.length > 0 && !editingHasPaidSplit && (
+                <div className="expense-split-panel">
+                  <div className="expense-split-header">
+                    <div>
+                      <span className="expense-split-title">
+                        <Users className="w-4 h-4 text-[#a66bff]" />
+                        Split Among Group Members
+                      </span>
+                      <p className="expense-split-subtitle">
+                        Choose how to allocate this USD expense across crew
+                        members.
+                      </p>
+                    </div>
+
+                    {(splitMode === "percentage" || splitMode === "fixed") &&
+                      selectedMemberIds.length > 0 && (
+                        <button
+                          type="button"
+                          className="split-even-button"
+                          onClick={handleDistributeEvenly}
+                        >
+                          Split Evenly
+                        </button>
+                      )}
+                  </div>
+
+                  {/* Mode Switcher */}
+                  <div className="split-mode-tabs" role="tablist">
+                    {SPLIT_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={splitMode === mode.id}
+                        className={`split-mode-tab ${
+                          splitMode === mode.id ? "active" : ""
+                        }`}
+                        onClick={() => handleSplitModeChange(mode.id)}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {splitMode !== "none" && (
+                    <div className="split-member-list">
+                      {groupMembers.map((member) => {
+                        const memberId = getMemberId(member);
+                        const isSelected = selectedMemberIds.includes(memberId);
+                        const share =
+                          splitEvaluation.sharesByMember?.[memberId] ?? 0;
+                        const pctValue = percentagesByMember[memberId] ?? 0;
+                        const fixedValue = fixedAmountsByMember[memberId] ?? "";
+
+                        return (
+                          <div
+                            key={memberId}
+                            className={`split-member-row ${
+                              isSelected ? "selected" : "unselected"
+                            }`}
+                          >
+                            <label className="split-member-check">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleMember(memberId)}
+                              />
+                              <span className="split-member-name">
+                                {getMemberLabel(member)}
+                              </span>
+                            </label>
+
+                            {isSelected ? (
+                              <div className="split-member-controls">
+                                {splitMode === "percentage" && (
+                                  <div className="split-pct-inputs">
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max="100"
+                                      step="0.5"
+                                      aria-label={`Percentage slider for ${getMemberLabel(member)}`}
+                                      value={Number(pctValue) || 0}
+                                      onChange={(e) =>
+                                        setPercentagesByMember((prev) => ({
+                                          ...prev,
+                                          [memberId]: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                    <div className="split-number-wrap">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.1"
+                                        aria-label={`Percentage for ${getMemberLabel(member)}`}
+                                        value={pctValue}
+                                        onChange={(e) =>
+                                          setPercentagesByMember((prev) => ({
+                                            ...prev,
+                                            [memberId]: e.target.value,
+                                          }))
+                                        }
+                                      />
+                                      <span>%</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {splitMode === "fixed" && (
+                                  <div className="split-number-wrap fixed-amount-wrap">
+                                    <span>$</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      placeholder="0.00"
+                                      aria-label={`Fixed amount for ${getMemberLabel(member)}`}
+                                      value={fixedValue}
+                                      onChange={(e) =>
+                                        setFixedAmountsByMember((prev) => ({
+                                          ...prev,
+                                          [memberId]: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </div>
+                                )}
+
+                                <span className="split-calculated-share">
+                                  {formatUSD(share)}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="split-excluded-tag">
+                                Excluded
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Split Allocation Summary Bar */}
+                      <div
+                        className={`split-summary-bar ${
+                          splitEvaluation.isValid ? "valid" : "invalid"
+                        }`}
+                      >
+                        {splitEvaluation.isValid ? (
+                          <div className="split-summary-ok">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <span>
+                              Allocated:{" "}
+                              <strong>
+                                {formatUSD(splitEvaluation.totalAssigned)} USD
+                              </strong>{" "}
+                              across {selectedMemberIds.length}{" "}
+                              {selectedMemberIds.length === 1
+                                ? "member"
+                                : "members"}
+                              {splitMode === "percentage" &&
+                                ` (${Number(splitEvaluation.totalPercentage || 100).toFixed(1)}%)`}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="split-summary-err">
+                            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span>{splitEvaluation.error}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="form-actions">
                 <button
                   type="button"
                   className="cancel-expense-button"
                   onClick={() => setShowForm(false)}
-                  disabled={submitting}
                 >
                   Cancel
                 </button>
-
                 <button
                   type="submit"
                   className="add-expense-button"
                   disabled={submitting}
                 >
                   {submitting
-                    ? "Saving to DB..."
+                    ? "Saving..."
                     : editingId !== null
-                      ? "Save Changes"
+                      ? "Update Expense"
                       : "Save Expense"}
                 </button>
               </div>
@@ -513,124 +1122,300 @@ export default function ExpenseTracker({
         </div>
       )}
 
-      {/* Expense History Table */}
-      <div className="panel expense-history-panel">
+      {/* Expense History Panel */}
+      <section className="panel expense-history-panel">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">RECORD MANAGEMENT</span>
-            <h2>Expense History</h2>
+            <span className="eyebrow">EXPENSE HISTORY</span>
+            <h2>Recorded Expenses & Splits</h2>
           </div>
-
-          <span className="member-count">
-            {filteredExpenses.length} RECORDS
+          <span className="expense-history-summary-chip">
+            {filteredExpenses.length}{" "}
+            {filteredExpenses.length === 1 ? "item" : "items"} •{" "}
+            {formatUSD(filteredTotal)} USD
           </span>
         </div>
 
-        {/* Filters */}
+        {/* Search & Category Filters */}
         <div className="expense-filters">
           <div className="expense-search-wrapper">
-            <Search className="w-4 h-4 text-[#7E8B99]" />
+            <Search className="w-4 h-4 text-[#7E8B99] shrink-0" />
             <input
               type="search"
               placeholder="Search expenses by title or description..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
 
           <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            aria-label="Filter by category"
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
           >
             <option value="All">All Categories</option>
-            {expenseCategories.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            {EXPENSE_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
               </option>
             ))}
           </select>
         </div>
 
         {loading ? (
+          <div className="empty-expenses">Loading expenses...</div>
+        ) : expenses.length === 0 ? (
           <div className="empty-expenses">
-            <div className="spinner" />
-            <p>Loading expenses from MongoDB...</p>
+            <span>◈</span>
+            <h3>No Expenses Recorded Yet</h3>
+            <p>
+              Click &ldquo;Add New Expense&rdquo; or scan a payment QR code to
+              start tracking USD expenses.
+            </p>
           </div>
         ) : filteredExpenses.length === 0 ? (
           <div className="empty-expenses">
-            <span>◈</span>
-            <h3>No expenses found</h3>
-            <p>Try changing your search query or add a new expense above.</p>
+            <span>⌕</span>
+            <h3>No Matching Expenses</h3>
+            <p>Try adjusting your search query or category filter.</p>
+            <button
+              type="button"
+              className="reset-filters-button"
+              onClick={resetFilters}
+            >
+              Clear Filters
+            </button>
           </div>
         ) : (
-          <div className="expense-table-wrapper">
-            <table className="expense-table">
-              <thead>
-                <tr>
-                  <th>EXPENSE</th>
-                  <th>CATEGORY</th>
-                  <th>DATE</th>
-                  <th>AMOUNT</th>
-                  <th>ACTIONS</th>
-                </tr>
-              </thead>
+          <div className="expense-history-list">
+            {filteredExpenses.map((exp) => {
+              const expId = exp.id || exp._id;
+              const isExpanded = expandedIds.has(expId);
+              const splits = Array.isArray(exp.splits) ? exp.splits : [];
+              const paymentStatus = summarizeExpensePaymentStatus(splits);
+              const hasLegacyCurrency =
+                exp.currency && exp.currency !== "USD";
 
-              <tbody>
-                {filteredExpenses.map((exp) => (
-                  <tr key={exp.id || exp._id}>
-                    <td>
-                      <div className="expense-title-cell">
-                        <strong>{exp.title}</strong>
-                        <span>
-                          {exp.description || "No description provided"}
+              const groupIdStr =
+                typeof exp.group === "object"
+                  ? getMemberId(exp.group)
+                  : String(exp.group || "");
+              const groupObj = groupIdStr
+                ? groups.find((g) => getMemberId(g) === groupIdStr)
+                : null;
+              const groupLabel =
+                (typeof exp.group === "object" && exp.group?.name) ||
+                groupObj?.name ||
+                null;
+
+              return (
+                <article
+                  key={expId}
+                  className={`expense-history-card ${
+                    isExpanded ? "expanded" : ""
+                  }`}
+                >
+                  <div
+                    className="expense-history-row"
+                    onClick={() => toggleExpand(expId)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpand(expId);
+                      }
+                    }}
+                    aria-expanded={isExpanded}
+                  >
+                    <div className="expense-history-main">
+                      <div className="expense-title-line">
+                        <span className="expense-category-tag">
+                          {CATEGORY_ICONS[exp.category] || "📦"} {exp.category}
                         </span>
+                        <strong className="expense-item-title">
+                          {exp.title}
+                        </strong>
                       </div>
-                    </td>
 
-                    <td>
-                      <span className="expense-category-tag">
-                        {categoryIcons[exp.category]} {exp.category}
-                      </span>
-                    </td>
+                      <div className="expense-meta-line">
+                        <span>{formatDate(exp.date)}</span>
+                        {exp.paidBy && (
+                          <>
+                            <span>•</span>
+                            <span>Paid by {exp.paidBy}</span>
+                          </>
+                        )}
+                        {groupLabel && (
+                          <>
+                            <span>•</span>
+                            <span>{groupLabel}</span>
+                          </>
+                        )}
+                        {splits.length > 0 && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              {exp.splitType === "custom" ? "Custom" : "Equal"}{" "}
+                              split ({splits.length}{" "}
+                              {splits.length === 1 ? "share" : "shares"})
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
 
-                    <td>{formatDate(exp.date)}</td>
+                    <div className="expense-history-right">
+                      {paymentStatus && (
+                        <span
+                          className={`expense-status-pill tone-${paymentStatus.tone}`}
+                        >
+                          {paymentStatus.label}
+                        </span>
+                      )}
 
-                    <td className="expense-amount">
-                      {formatMoney(exp.amount)}
-                    </td>
+                      <div className="expense-amount-block">
+                        <span className="expense-amount">
+                          {formatUSD(exp.amount)}
+                        </span>
+                        <span className="expense-currency-code">
+                          {exp.currency || "USD"}
+                        </span>
+                        {hasLegacyCurrency && (
+                          <span
+                            className="expense-legacy-currency-badge"
+                            title="Recorded prior to USD standardization"
+                          >
+                            Legacy {exp.currency}
+                          </span>
+                        )}
+                      </div>
 
-                    <td>
-                      <div className="expense-actions">
+                      <div
+                        className="expense-actions"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="expand-expense-btn"
+                          onClick={() => toggleExpand(expId)}
+                          title={isExpanded ? "Hide details" : "View details"}
+                          aria-label={
+                            isExpanded
+                              ? `Hide details for ${exp.title}`
+                              : `View details for ${exp.title}`
+                          }
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4" />
+                          )}
+                        </button>
                         <button
                           type="button"
                           className="edit-expense"
                           onClick={() => openEditForm(exp)}
-                          aria-label={`Edit ${exp.title}`}
                           title="Edit expense"
+                          aria-label={`Edit ${exp.title}`}
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
+                          <Edit2 className="w-4 h-4" />
                         </button>
-
                         <button
                           type="button"
                           className="delete-expense"
-                          onClick={() =>
-                            handleDelete(exp.id || exp._id, exp.title)
-                          }
-                          aria-label={`Delete ${exp.title}`}
+                          onClick={(e) => handleDelete(expId, e)}
                           title="Delete expense"
+                          aria-label={`Delete ${exp.title}`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+
+                  {/* Expandable Expense Details */}
+                  {isExpanded && (
+                    <div className="expense-history-details">
+                      <div className="expense-detail-meta-grid">
+                        <div>
+                          <span className="detail-label">Description</span>
+                          <p className="detail-value">
+                            {exp.description || "No description provided."}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="detail-label">Split Method</span>
+                          <p className="detail-value capitalize">
+                            {splits.length > 0
+                              ? `${exp.splitType || "equal"} split`
+                              : "Not split (Personal)"}
+                          </p>
+                        </div>
+                        {exp.paidBy && (
+                          <div>
+                            <span className="detail-label">Recorded By</span>
+                            <p className="detail-value">{exp.paidBy}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {splits.length > 0 && (
+                        <div className="expense-detail-splits">
+                          <span className="detail-label">
+                            Member Shares ({splits.length})
+                          </span>
+                          <div className="expense-split-chips">
+                            {splits.map((s, idx) => {
+                              const sStatus = String(
+                                s.status || "pending",
+                              ).toLowerCase();
+                              const sharePct =
+                                Number(exp.amount || 0) > 0
+                                  ? (
+                                      (Number(s.amount || 0) /
+                                        Number(exp.amount)) *
+                                      100
+                                    ).toFixed(1)
+                                  : "0.0";
+
+                              return (
+                                <div
+                                  key={s.userId || idx}
+                                  className="expense-split-detail-row"
+                                >
+                                  <div className="split-detail-member">
+                                    <strong>{s.name || "Member"}</strong>
+                                    <span>({sharePct}%)</span>
+                                  </div>
+                                  <div className="split-detail-right">
+                                    <span className="split-detail-amount">
+                                      {formatUSD(s.amount)} USD
+                                    </span>
+                                    <span
+                                      className={`split-detail-status status-${sStatus}`}
+                                    >
+                                      {sStatus === "paid"
+                                        ? "Paid"
+                                        : sStatus === "approved"
+                                          ? "Approved"
+                                          : "Pending"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }

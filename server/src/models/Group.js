@@ -17,7 +17,7 @@ const groupSchema = new mongoose.Schema(
 
     targetAmount: {
       type: Number,
-      default: 200,
+      required: true,
       min: 0
     },
 

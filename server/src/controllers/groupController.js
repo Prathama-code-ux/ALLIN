@@ -15,28 +15,46 @@ export const createGroup = async (req, res) => {
             });
         }
 
+        const hasTargetValue =
+            targetAmount !== undefined &&
+            targetAmount !== null &&
+            String(targetAmount).trim() !== "";
+        const parsedTarget = Number(targetAmount);
+
+        if (!hasTargetValue || !Number.isFinite(parsedTarget) || parsedTarget <= 0) {
+            return res.status(400).json({
+                message: "A valid positive target amount (USD) is required"
+            });
+        }
+
+        const normalizedTarget = Number(parsedTarget.toFixed(2));
         const inviteCode = crypto.randomBytes(4).toString("hex").toUpperCase();
 
         const group = await Group.create({
             name: name.trim(),
             description: (description || "").trim(),
-            targetAmount: targetAmount && !isNaN(targetAmount) ? Number(targetAmount) : 200,
+            targetAmount: normalizedTarget,
             createdBy: req.user._id,
             members: [req.user._id],
             inviteCode
         });
 
+        const populatedGroup = await Group.findById(group._id)
+            .populate("createdBy", "name email")
+            .populate("members", "name email");
+
         return res.status(201).json({
             message: "Group created successfully",
             group: {
-                id: group._id,
-                _id: group._id,
-                name: group.name,
-                description: group.description,
-                targetAmount: group.targetAmount,
-                createdBy: group.createdBy,
-                members: group.members,
-                inviteCode: group.inviteCode
+                id: populatedGroup._id,
+                _id: populatedGroup._id,
+                name: populatedGroup.name,
+                description: populatedGroup.description,
+                targetAmount: populatedGroup.targetAmount,
+                status: populatedGroup.status,
+                createdBy: populatedGroup.createdBy,
+                members: populatedGroup.members,
+                inviteCode: populatedGroup.inviteCode
             }
         });
     } catch (error) {
@@ -203,7 +221,8 @@ export const getGroupContributions = async (req, res) => {
             });
         }
 
-        const targetAmount = Number(group.targetAmount || 200);
+        const parsedGroupTarget = Number(group.targetAmount);
+        const targetAmount = Number.isFinite(parsedGroupTarget) ? parsedGroupTarget : 0;
         const memberCount = Math.max(group.members.length, 1);
         const perMemberTarget = targetAmount / memberCount;
 
@@ -213,8 +232,8 @@ export const getGroupContributions = async (req, res) => {
             status: "captured"
         });
 
-        // Fetch group expenses with splits
-        const groupExpenses = await Expense.find({ group: group._id });
+        // Fetch active group expenses with splits
+        const groupExpenses = await Expense.find({ group: group._id, deletedAt: null });
 
         // Group payments by user
         const paymentSums = {};
