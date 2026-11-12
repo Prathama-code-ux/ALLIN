@@ -19,9 +19,13 @@ export const createPaymentOrder = async (amountOrParams, currency = 'USD', group
     throw new Error(data?.message || 'Unable to create payment order');
   }
 
-  if (!data.approvalURL) {
+  const approveUrl = data.approvalURL || data.approveUrl;
+  if (!approveUrl) {
     throw new Error('PayPal approval URL was not returned');
   }
+
+  data.approvalURL = approveUrl;
+  data.approveUrl = approveUrl;
 
   return data;
 };

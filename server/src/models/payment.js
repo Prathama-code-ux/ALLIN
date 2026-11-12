@@ -2,22 +2,46 @@ import mongoose from "mongoose";
 
 const paymentSchema = new mongoose.Schema(
   {
+    paymentPurpose: {
+      type: String,
+      enum: ["GROUP_CONTRIBUTION", "EXPENSE_ADVANCE", "REIMBURSEMENT"],
+      default: "GROUP_CONTRIBUTION",
+      index: true
+    },
+
     expense: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Expense",
-      default: null
+      default: null,
+      index: true
+    },
+
+    settlement: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Settlement",
+      default: null,
+      index: true
     },
 
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
-      default: null
+      default: null,
+      index: true
     },
 
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      default: null
+      default: null,
+      index: true
+    },
+
+    counterparty: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true
     },
 
     amount: {
@@ -42,7 +66,8 @@ const paymentSchema = new mongoose.Schema(
         "voided",
         "refunded"
       ],
-      default: "pending"
+      default: "pending",
+      index: true
     },
 
     paypalOrderId: {

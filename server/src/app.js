@@ -7,6 +7,7 @@ import authRoutes from "./routes/authRoutes.js";
 import groupRoutes from "./routes/groupRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import paymentRoutes from "./routes/payment.route.js";
+import settlementRoutes from "./routes/settlementRoutes.js";
 import register, { httpRequestDuration } from "./config/metrics.js";
 
 const app = express();
@@ -19,7 +20,10 @@ const allowedOrigins = [
     process.env.CLIENT_URL,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://localhost:3000"
+    "http://localhost:4000",
+    "http://127.0.0.1:4000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
 ].filter(Boolean);
 
 app.use(
@@ -72,6 +76,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/settlements", settlementRoutes);
 
 // Health check endpoints (both /health and /api/health for compatibility)
 app.get(["/health", "/api/health"], (req, res) => {

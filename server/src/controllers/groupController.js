@@ -3,6 +3,7 @@ import crypto from "crypto";
 import Group from "../models/Group.js";
 import Payment from "../models/payment.js";
 import Expense from "../models/expense.js";
+import Settlement from "../models/settlement.js";
 import User from "../models/User.js";
 
 export const createGroup = async (req, res) => {
@@ -34,6 +35,8 @@ export const createGroup = async (req, res) => {
             name: name.trim(),
             description: (description || "").trim(),
             targetAmount: normalizedTarget,
+            poolBalance: 0,
+            collectedAmount: 0,
             createdBy: req.user._id,
             members: [req.user._id],
             inviteCode
@@ -51,6 +54,7 @@ export const createGroup = async (req, res) => {
                 name: populatedGroup.name,
                 description: populatedGroup.description,
                 targetAmount: populatedGroup.targetAmount,
+                poolBalance: populatedGroup.poolBalance || 0,
                 status: populatedGroup.status,
                 createdBy: populatedGroup.createdBy,
                 members: populatedGroup.members,
@@ -68,34 +72,36 @@ export const createGroup = async (req, res) => {
 export const getMyGroups = async (req, res) => {
     try {
         let groups = await Group.find({
-    members: req.user._id,
-    deletedAt: null
-})
-        .populate("createdBy", "name email")
-        .populate("members", "name email");
+            members: req.user._id,
+            deletedAt: null
+        })
+            .populate("createdBy", "name email")
+            .populate("members", "name email");
 
-        // If user has no groups, create an initial "ALLIN Squad" workspace group automatically
         if (groups.length === 0) {
             const inviteCode = crypto.randomBytes(4).toString("hex").toUpperCase();
             const defaultGroup = await Group.create({
                 name: "ALLIN Squad",
                 description: "Collaborative payment crew",
                 targetAmount: 200,
+                poolBalance: 0,
+                collectedAmount: 0,
                 createdBy: req.user._id,
                 members: [req.user._id],
                 inviteCode
             });
 
-            groups = [await Group.findById(defaultGroup._id)
-                .populate("createdBy", "name email")
-                .populate("members", "name email")];
+            groups = [
+                await Group.findById(defaultGroup._id)
+                    .populate("createdBy", "name email")
+                    .populate("members", "name email")
+            ];
         }
 
         return res.status(200).json({
             count: groups.length,
             groups
         });
-
     } catch (error) {
         console.error("Get groups error:", error);
         return res.status(500).json({
@@ -115,10 +121,10 @@ export const joinGroup = async (req, res) => {
         }
 
         const group = await Group.findOne({
-    inviteCode: inviteCode.trim().toUpperCase(),
-    deletedAt: null,
-    status: "active"
-});
+            inviteCode: inviteCode.trim().toUpperCase(),
+            deletedAt: null,
+            status: "active"
+        });
 
         if (!group) {
             return res.status(404).json({
@@ -126,8 +132,8 @@ export const joinGroup = async (req, res) => {
             });
         }
 
-        const alreadyMember = group.members.some(
-            memberId => memberId.equals(req.user._id)
+        const alreadyMember = group.members.some((memberId) =>
+            memberId.equals(req.user._id)
         );
 
         if (alreadyMember) {
@@ -143,7 +149,6 @@ export const joinGroup = async (req, res) => {
             message: "Joined group successfully",
             group
         });
-
     } catch (error) {
         console.error("Join group error:", error);
         return res.status(500).json({
@@ -163,9 +168,9 @@ export const getGroupById = async (req, res) => {
         }
 
         const group = await Group.findOne({
-    _id: id,
-    deletedAt: null
-})
+            _id: id,
+            deletedAt: null
+        })
             .populate("createdBy", "name email")
             .populate("members", "name email");
 
@@ -175,8 +180,8 @@ export const getGroupById = async (req, res) => {
             });
         }
 
-        const isMember = group.members.some(
-            member => member._id.equals(req.user._id)
+        const isMember = group.members.some((member) =>
+            member._id.equals(req.user._id)
         );
 
         if (!isMember) {
@@ -188,7 +193,6 @@ export const getGroupById = async (req, res) => {
         return res.status(200).json({
             group
         });
-
     } catch (error) {
         console.error("Get group error:", error);
         return res.status(500).json({
@@ -197,7 +201,7 @@ export const getGroupById = async (req, res) => {
     }
 };
 
-// Calculate group contributions dynamically from DB payments and expense splits
+// Calculate group ledger: confirmed pool contributions, pool balance, personal advances, settlements, member balances
 export const getGroupContributions = async (req, res) => {
     try {
         const { id } = req.params;
@@ -209,9 +213,9 @@ export const getGroupContributions = async (req, res) => {
         }
 
         const group = await Group.findOne({
-    _id: id,
-    deletedAt: null
-})
+            _id: id,
+            deletedAt: null
+        })
             .populate("createdBy", "name email")
             .populate("members", "name email");
 
@@ -226,32 +230,52 @@ export const getGroupContributions = async (req, res) => {
         const memberCount = Math.max(group.members.length, 1);
         const perMemberTarget = targetAmount / memberCount;
 
-        // Fetch completed payments for this group
-        const payments = await Payment.find({
+        // 1. Fetch confirmed group contributions (money deposited into shared group pool)
+        // Only confirmed GROUP_CONTRIBUTION payments count toward target and pool!
+        const confirmedContributions = await Payment.find({
             group: group._id,
-            status: "captured"
+            status: "captured",
+            paymentPurpose: { $in: ["GROUP_CONTRIBUTION", null] },
+            expense: null,
+            settlement: null
         });
 
-        // Fetch active group expenses with splits
-        const groupExpenses = await Expense.find({ group: group._id, deletedAt: null });
+        // Sum contributions by member and total
+        const memberDeposits = {};
+        let totalConfirmedContributions = 0;
 
-        // Group payments by user
-        const paymentSums = {};
-        let totalPool = 0;
-
-        payments.forEach(p => {
+        confirmedContributions.forEach((p) => {
             const uid = p.user ? String(p.user) : "unassigned";
-            paymentSums[uid] = (paymentSums[uid] || 0) + Number(p.amount);
-            totalPool += Number(p.amount);
+            const amt = Number(p.amount || 0);
+            memberDeposits[uid] = (memberDeposits[uid] || 0) + amt;
+            totalConfirmedContributions += amt;
         });
 
-        // Group expense splits by member
-        const memberSplits = {};
-        let totalExpensesAmount = 0;
+        // 2. Fetch active group expenses
+        const groupExpenses = await Expense.find({
+            group: group._id,
+            deletedAt: null
+        }).populate("paidBy", "name email");
 
-        groupExpenses.forEach(exp => {
-            totalExpensesAmount += Number(exp.amount || 0);
-            (exp.splits || []).forEach(s => {
+        let totalExpensesAmount = 0;
+        let totalPoolFundedExpenses = 0;
+        let totalPersonalAdvances = 0;
+        const memberSplits = {};
+        const memberPersonalPaid = {};
+
+        groupExpenses.forEach((exp) => {
+            const expAmt = Number(exp.amount || 0);
+            totalExpensesAmount += expAmt;
+
+            if (exp.paymentSource === "pool") {
+                totalPoolFundedExpenses += expAmt;
+            } else {
+                totalPersonalAdvances += expAmt;
+                const payerId = exp.paidBy?._id ? String(exp.paidBy._id) : String(exp.paidBy);
+                memberPersonalPaid[payerId] = (memberPersonalPaid[payerId] || 0) + expAmt;
+            }
+
+            (exp.splits || []).forEach((s) => {
                 const uid = String(s.user);
                 if (!memberSplits[uid]) {
                     memberSplits[uid] = [];
@@ -262,52 +286,93 @@ export const getGroupContributions = async (req, res) => {
                     amount: s.amount,
                     status: s.status,
                     approvedAt: s.approvedAt,
-                    paidAt: s.paidAt
+                    paidAt: s.paidAt,
+                    paymentSource: exp.paymentSource || "personal"
                 });
             });
         });
 
-        const contributions = group.members.map(member => {
+        // Available Pool Balance = Confirmed Group Contributions - Pool-Funded Expenses
+        const availablePoolBalance = Math.max(
+            0,
+            Number((totalConfirmedContributions - totalPoolFundedExpenses).toFixed(2))
+        );
+
+        // 3. Fetch all active settlements for this group
+        const settlements = await Settlement.find({
+            group: group._id
+        }).populate("debtor", "name email").populate("creditor", "name email");
+
+        const memberOwes = {};
+        const memberOwed = {};
+
+        settlements.forEach((s) => {
+            if (s.status !== "completed") {
+                const remaining = Math.max(0, Number((s.amount - (s.settledAmount || 0)).toFixed(2)));
+                const debtorId = s.debtor?._id ? String(s.debtor._id) : String(s.debtor);
+                const creditorId = s.creditor?._id ? String(s.creditor._id) : String(s.creditor);
+
+                memberOwes[debtorId] = (memberOwes[debtorId] || 0) + remaining;
+                memberOwed[creditorId] = (memberOwed[creditorId] || 0) + remaining;
+            }
+        });
+
+        // 4. Construct Member Details
+        const contributions = group.members.map((member) => {
             const uid = String(member._id);
-            const userPaid = paymentSums[uid] || 0;
+            const userDeposited = memberDeposits[uid] || 0;
+            const userPersonalPaid = memberPersonalPaid[uid] || 0;
             const splits = memberSplits[uid] || [];
-            const userOwedFromSplits = splits.reduce((sum, s) => sum + Number(s.amount || 0), 0);
-            const pendingSplits = splits.filter(s => s.status !== "paid");
+            const userAllocatedShare = splits.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+
+            const pendingSplits = splits.filter((s) => s.status !== "paid");
             const pendingAmount = pendingSplits.reduce((sum, s) => sum + Number(s.amount || 0), 0);
 
-            // Default share: if member has pending splits, show pending splits; otherwise show equal share
-            const defaultShare = userOwedFromSplits > 0
-                ? (pendingAmount > 0 ? pendingAmount : userOwedFromSplits)
-                : (userPaid > 0 ? userPaid : perMemberTarget);
+            const userOwes = Number((memberOwes[uid] || 0).toFixed(2));
+            const userOwed = Number((memberOwed[uid] || 0).toFixed(2));
+            const netBalance = Number((userOwed - userOwes).toFixed(2));
+
+            // Default share for display/paying: pending debt or equal share
+            const defaultShare = userOwes > 0
+                ? userOwes
+                : pendingAmount > 0
+                ? pendingAmount
+                : userDeposited > 0
+                ? userDeposited
+                : perMemberTarget;
 
             const percentage = targetAmount > 0
-                ? Math.min(Math.round((userPaid / targetAmount) * 100), 100)
+                ? Math.min(Math.round((userDeposited / targetAmount) * 100), 100)
                 : 0;
 
             const isAdmin = group.createdBy._id.equals(member._id);
-
             const initials = (member.name || "U")
                 .split(" ")
-                .map(n => n[0])
+                .map((n) => n[0])
                 .join("")
                 .slice(0, 2)
                 .toUpperCase();
 
-            // Status: COMPLETED if no pending splits and has contributed, otherwise PENDING
-            const isCompleted = userOwedFromSplits > 0
-                ? pendingSplits.length === 0 && userPaid > 0
-                : userPaid > 0;
+            // Status is COMPLETED if member has no pending debts and has paid share or deposited
+            const isCompleted = userOwes === 0 && (pendingSplits.length === 0 || userDeposited > 0);
 
             return {
                 id: member._id,
                 userId: member._id,
                 name: member.name,
+                email: member.email,
                 initials,
                 role: isAdmin ? "Admin" : "Member",
                 amount: Number(defaultShare.toFixed(2)),
-                paidAmount: Number(userPaid.toFixed(2)),
-                totalOwed: Number(userOwedFromSplits.toFixed(2)),
+                paidAmount: Number(userDeposited.toFixed(2)),
+                userDeposited: Number(userDeposited.toFixed(2)),
+                personallyPaid: Number(userPersonalPaid.toFixed(2)),
+                totalOwed: Number(userAllocatedShare.toFixed(2)),
+                allocatedShare: Number(userAllocatedShare.toFixed(2)),
                 pendingAmount: Number(pendingAmount.toFixed(2)),
+                owes: userOwes,
+                owed: userOwed,
+                netBalance,
                 percentage,
                 status: isCompleted ? "COMPLETED" : "PENDING",
                 splits,
@@ -320,12 +385,16 @@ export const getGroupContributions = async (req, res) => {
             groupId: group._id,
             groupName: group.name,
             targetAmount,
-            totalPool: Number(totalPool.toFixed(2)),
-            remaining: Math.max(0, Number((targetAmount - totalPool).toFixed(2))),
+            // totalPool represents total confirmed deposits collected toward the target
+            totalPool: Number(totalConfirmedContributions.toFixed(2)),
+            totalConfirmedContributions: Number(totalConfirmedContributions.toFixed(2)),
+            availablePoolBalance,
+            poolFundedExpenses: Number(totalPoolFundedExpenses.toFixed(2)),
+            personalAdvances: Number(totalPersonalAdvances.toFixed(2)),
+            remaining: Math.max(0, Number((targetAmount - totalConfirmedContributions).toFixed(2))),
             totalExpenses: Number(totalExpensesAmount.toFixed(2)),
             contributions
         });
-
     } catch (error) {
         console.error("Get group contributions error:", error);
         return res.status(500).json({
@@ -371,7 +440,6 @@ export const closeGroup = async (req, res) => {
             });
         }
 
-        // Do not close while a payment is still in progress.
         const inFlightPayment = await Payment.findOne({
             group: group._id,
             status: { $in: ["pending", "approved", "authorized"] }
@@ -384,21 +452,19 @@ export const closeGroup = async (req, res) => {
             });
         }
 
-        // Count only verified paid expense splits.
-        const expenses = await Expense.find({
+        // Count confirmed contributions
+        const confirmedPayments = await Payment.find({
             group: group._id,
-            deletedAt: null
+            status: "captured",
+            paymentPurpose: { $in: ["GROUP_CONTRIBUTION", null] },
+            expense: null,
+            settlement: null
         });
 
-        const collectedAmount = expenses.reduce((total, expense) => {
-            const paidSplits = (expense.splits || [])
-                .filter(split => split.status === "paid");
-
-            return total + paidSplits.reduce(
-                (sum, split) => sum + Number(split.amount || 0),
-                0
-            );
-        }, 0);
+        const collectedAmount = confirmedPayments.reduce(
+            (sum, p) => sum + Number(p.amount || 0),
+            0
+        );
 
         const targetAmount = Number(group.targetAmount || 0);
 
@@ -408,9 +474,7 @@ export const closeGroup = async (req, res) => {
                 message: "The group collection target has not been reached",
                 targetAmount,
                 collectedAmount: Number(collectedAmount.toFixed(2)),
-                remaining: Number(
-                    Math.max(0, targetAmount - collectedAmount).toFixed(2)
-                )
+                remaining: Number(Math.max(0, targetAmount - collectedAmount).toFixed(2))
             });
         }
 
@@ -432,7 +496,6 @@ export const closeGroup = async (req, res) => {
                 closedAt: group.closedAt
             }
         });
-
     } catch (error) {
         console.error("Close group error:", error);
         return res.status(500).json({
@@ -441,7 +504,6 @@ export const closeGroup = async (req, res) => {
         });
     }
 };
-
 
 export const deleteGroup = async (req, res) => {
     try {
@@ -494,7 +556,6 @@ export const deleteGroup = async (req, res) => {
             success: true,
             message: "Group deleted successfully"
         });
-
     } catch (error) {
         console.error("Delete group error:", error);
         return res.status(500).json({

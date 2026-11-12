@@ -1,5 +1,5 @@
 import React from "react";
-import { Users, CheckCircle2, Clock, ArrowRight, Shield } from "lucide-react";
+import { Users, CheckCircle2, Clock, ArrowRight, Shield, Wallet, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { formatUSD } from "../../utils/currency";
 
 export default function Contributions({
@@ -9,6 +9,7 @@ export default function Contributions({
   paymentLoading,
   paymentCompleted,
   currentUserId,
+  onOpenSettlements,
 }) {
   return (
     <div className="p-6 rounded-3xl bg-[#100d1d]/90 backdrop-blur-md border border-white/5 shadow-xl flex flex-col justify-between">
@@ -16,10 +17,10 @@ export default function Contributions({
         <div className="flex items-center justify-between pb-5 border-b border-white/5">
           <div>
             <span className="text-[10px] font-bold tracking-widest text-[#a66bff] uppercase">
-              CREW SPLITS & SHARES
+              CREW LEDGER & SHARES
             </span>
             <h2 className="text-xl font-bold text-[#F3F6F6] font-['Plus_Jakarta_Sans'] mt-0.5">
-              Group Contributions
+              Member Financial Status
             </h2>
           </div>
           <span className="px-3 py-1 rounded-full text-xs font-bold text-[#94A3B8] bg-white/5 border border-white/5">
@@ -34,8 +35,7 @@ export default function Contributions({
               No crew members yet
             </h3>
             <p className="text-xs max-w-xs mx-auto">
-              Share your group invite code from the "My Groups" tab to add
-              friends and split payments.
+              Share your group invite code from the "My Groups" tab to add friends and split payments.
             </p>
           </div>
         ) : (
@@ -43,47 +43,24 @@ export default function Contributions({
             {contributions.map((member) => {
               const isCurrentUser =
                 currentUserId &&
-                (member.userId === currentUserId ||
-                  member.id === currentUserId);
+                (member.userId === currentUserId || member.id === currentUserId);
 
-              const splits = member.splits || [];
-              const pendingSplits = member.pendingSplits || [];
+              const userDeposited = Number(member.userDeposited ?? member.paidAmount ?? 0);
+              const allocatedShare = Number(member.allocatedShare ?? member.totalOwed ?? 0);
+              const personallyPaid = Number(member.personallyPaid ?? 0);
+              const owes = Number(member.owes ?? 0);
+              const owed = Number(member.owed ?? 0);
 
-              // A member is fully paid only when every individual split is paid.
-              const isPaid =
-                splits.length > 0
-                  ? splits.every(
-                      (split) => String(split.status).toLowerCase() === "paid",
-                    )
-                  : member.status === "COMPLETED";
-
-              // Calculate actual payment progress from individual splits.
-              const totalSplitAmount = splits.reduce(
-                (total, split) => total + Number(split.amount || 0),
-                0,
-              );
-
-              const paidSplitAmount = splits.reduce(
-                (total, split) =>
-                  String(split.status).toLowerCase() === "paid"
-                    ? total + Number(split.amount || 0)
-                    : total,
-                0,
-              );
-
-              const calculatedPercentage =
-                totalSplitAmount > 0
-                  ? Math.round((paidSplitAmount / totalSplitAmount) * 100)
-                  : Number(member.percentage || 0);
+              const isPaid = owes === 0 && (member.pendingAmount === 0 || userDeposited > 0);
 
               return (
                 <div
                   key={member.id || member.name}
-                  className="py-4 space-y-3 transition-colors rounded-xl px-2 hover:bg-white/[0.02]"
+                  className="py-4 space-y-2.5 transition-colors rounded-xl px-2 hover:bg-white/[0.02]"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#a66bff]/30 via-[#8b43f6]/20 to-[#6125c8]/30 border border-[#a66bff]/30 flex items-center justify-center font-bold text-sm text-[#F3F6F6] shadow-sm">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#a66bff]/30 via-[#8b43f6]/20 to-[#6125c8]/30 border border-[#a66bff]/30 flex items-center justify-center font-bold text-sm text-[#F3F6F6] shadow-sm shrink-0">
                         {member.initials || "U"}
                       </div>
 
@@ -102,133 +79,64 @@ export default function Contributions({
                           </span>
                         </div>
 
-                        {/* Progress Bar */}
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <div className="w-24 sm:w-32 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-[#a66bff] to-[#00E5D4]"
-                              style={{
-                                width: `${calculatedPercentage}%`,
-                              }}
-                            />
-                          </div>
-                          <span className="text-[11px] font-semibold text-[#94A3B8]">
-                            {calculatedPercentage}%
+                        {/* Breakdown pills */}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[11px] text-[#94A3B8]">
+                          <span>
+                            Deposited: <strong className="text-emerald-400 font-mono">{formatUSD(userDeposited)}</strong>
                           </span>
+                          <span>•</span>
+                          <span>
+                            Share: <strong className="text-white font-mono">{formatUSD(allocatedShare)}</strong>
+                          </span>
+                          {personallyPaid > 0 && (
+                            <>
+                              <span>•</span>
+                              <span>
+                                Advances: <strong className="text-[#c49cff] font-mono">{formatUSD(personallyPaid)}</strong>
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      <div className="text-sm font-bold text-[#F3F6F6]">
-                        {formatUSD(member.amount)}
-                      </div>
-                      <span
-                        className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                          isPaid
-                            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"
-                            : "bg-amber-500/15 text-amber-400 border border-amber-500/25"
-                        }`}
-                      >
-                        {isPaid ? "PAID" : "PENDING"}
-                      </span>
+                    <div className="text-right shrink-0">
+                      {owes > 0 ? (
+                        <div>
+                          <span className="text-[10px] text-amber-400 block font-semibold">Owes Members</span>
+                          <span className="text-sm font-bold text-amber-300 font-mono">
+                            {formatUSD(owes)} USD
+                          </span>
+                        </div>
+                      ) : owed > 0 ? (
+                        <div>
+                          <span className="text-[10px] text-emerald-400 block font-semibold">Owed by Crew</span>
+                          <span className="text-sm font-bold text-emerald-300 font-mono">
+                            +{formatUSD(owed)} USD
+                          </span>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-xs font-bold text-emerald-400">Settled</span>
+                          <span className="text-[10px] text-[#94A3B8] block">No debt</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Individual Split Breakdown & Actions for Current User */}
-                  {splits.length > 0 && (
-                    <div className="pt-2 pl-12 space-y-2">
-                      {splits.map((s, idx) => {
-                        const splitPaid =
-                          String(s.status).toLowerCase() === "paid";
-                        const splitApproved = s.status === "approved";
-
-                        return (
-                          <div
-                            key={s.expenseId || idx}
-                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-white/[0.03] border border-white/5 text-xs"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="text-[#94A3B8] font-medium">
-                                {s.expenseTitle || "Shared Expense"}
-                              </span>
-                              <span className="font-bold text-[#F3F6F6]">
-                                {formatUSD(s.amount)}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              {splitPaid ? (
-                                <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Paid via PayPal</span>
-                                </span>
-                              ) : isCurrentUser ? (
-                                <>
-                                  {!splitApproved && onApproveSplit && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        onApproveSplit(s.expenseId)
-                                      }
-                                      disabled={paymentLoading}
-                                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#c49cff] bg-[#a66bff]/15 hover:bg-[#a66bff]/25 border border-[#a66bff]/30 transition-all cursor-pointer"
-                                    >
-                                      Approve Share
-                                    </button>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      onPayNow({
-                                        expenseId: s.expenseId,
-                                        amount: s.amount,
-                                      })
-                                    }
-                                    disabled={paymentLoading}
-                                    className="px-3 py-1 rounded-lg text-[11px] font-bold text-white bg-gradient-to-r from-[#a66bff] to-[#8b43f6] hover:brightness-110 shadow-sm transition-all cursor-pointer flex items-center gap-1"
-                                  >
-                                    <span>Pay ({formatUSD(s.amount)} USD)</span>
-                                    <span className="text-[9px] uppercase opacity-75">
-                                      Sandbox
-                                    </span>
-                                  </button>
-                                </>
-                              ) : (
-                                <span className="text-[11px] font-medium text-amber-400 flex items-center gap-1">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  <span>
-                                    {s.status === "approved"
-                                      ? "Approved"
-                                      : "Pending Review"}
-                                  </span>
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                  {/* Quick Action for Current User if owes money */}
+                  {isCurrentUser && owes > 0 && onOpenSettlements && (
+                    <div className="pt-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={onOpenSettlements}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold hover:bg-amber-500/25 flex items-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <ArrowDownLeft className="w-3.5 h-3.5" />
+                        <span>Settle {formatUSD(owes)} Debt</span>
+                      </button>
                     </div>
                   )}
-
-                  {/* Fallback Pay Button for user when no split breakdown is detailed */}
-                  {splits.length === 0 &&
-                    !isPaid &&
-                    isCurrentUser &&
-                    onPayNow && (
-                      <div className="pt-1 pl-12 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => onPayNow(member.amount)}
-                          disabled={paymentLoading}
-                          className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#a66bff] to-[#8b43f6] hover:brightness-110 shadow-[0_0_15px_rgba(166,107,255,0.3)] transition-all cursor-pointer flex items-center gap-1.5"
-                        >
-                          <span>Pay via PayPal Sandbox</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
                 </div>
               );
             })}
